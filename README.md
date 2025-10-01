@@ -46,8 +46,6 @@ Example controller configurations
 
 Sample simulation runs
 
-👉 For extended technical notes and ongoing research, see my aerospace blog
-. https://mchalakaerospace.blogspot.com/2024/07/multi-axis-rotary-wing-integrated.html
 
 ⚠️ Disclaimer
 
