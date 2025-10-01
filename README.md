@@ -10,17 +10,10 @@ URDF/Xacro Models: Parametric description of UAV geometry and joints.
 
 Custom Controllers: ROS 2 nodes in Python/C++ for wing/actuator commands and thrust management.
 
-Gazebo Worlds & Plugins: Wind, wrench, IMU, and thruster integration for realistic testing.
+Gazebo Worlds & Plugins: Wind, wrench, IMU, and potential thruster integration for realistic testing.
 
 Trajectory & State Estimation: Odometry, IMU, and Kalman filter examples for UAV navigation.
 
-📂 Repository Structure
-MARID_UAV/
- ├── src/
- │    ├── marid_description/     # URDF/Xacro models / gazebo and RViz launch files
- │    ├── marid_controller/      # Control nodes
- ├── README.md
- ├── .gitignore
 
 🚀 Getting Started
 Prerequisites
