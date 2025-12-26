@@ -26,7 +26,7 @@ colcon build tools
 
 Build & Run
 # Clone repo
-git clone https://github.com/yourname/MARID_UAV.git
+git clone https://github.com/MChalak1/MARID_UAV.git
 cd MARID_UAV
 
 # Build
