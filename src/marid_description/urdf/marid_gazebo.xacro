@@ -1,0 +1,350 @@
+<?xml version="1.0"?>
+<robot name="marid" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- WIND ENABLE -->
+    <gazebo>
+      <enable_wind>true</enable_wind>
+    </gazebo>
+    <gazebo reference="left_wing"><enable_wind>true</enable_wind></gazebo>
+    <gazebo reference="right_wing"><enable_wind>true</enable_wind></gazebo>
+    <gazebo reference="base_link_front"><enable_wind>true</enable_wind></gazebo>
+    <gazebo reference="main_tail"><enable_wind>true</enable_wind></gazebo>
+    <gazebo reference="tail_right"><enable_wind>true</enable_wind></gazebo>
+    <gazebo reference="tail_left"><enable_wind>true</enable_wind></gazebo>
+    <gazebo reference="thruster_L"></gazebo>
+    <gazebo reference="thruster_R"></gazebo>
+
+
+
+    <gazebo reference="left_wing">
+        <kp>1e6</kp>
+        <kd>1.0</kd>
+        <minDepth>0.001</minDepth>
+        <maxVel>0.1</maxVel>
+    </gazebo>
+
+    <gazebo reference="right_wing">
+        <kp>1e6</kp>
+        <kd>1.0</kd>
+        <minDepth>0.001</minDepth>
+        <maxVel>0.1</maxVel>
+    </gazebo>
+
+    <gazebo reference="tail_left">
+        <kp>1e6</kp>
+        <kd>1.0</kd>
+        <minDepth>0.001</minDepth>
+        <maxVel>0.1</maxVel>
+    </gazebo>
+
+    <gazebo reference="tail_right">
+        <kp>1e6</kp>
+        <kd>1.0</kd>
+        <minDepth>0.001</minDepth>
+        <maxVel>0.1</maxVel>
+    </gazebo>
+
+    <gazebo>
+        <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
+            <link_name>left_wing</link_name>
+            <air_density>1.225</air_density>
+            <area>0.20674668328</area>  <!-- Increased for testing -->
+            <cla>2.0</cla>    <!-- Increased lift -->
+            <cda>0.5</cda>     <!-- Increased drag -->
+            <alpha_stall>0.35</alpha_stall>
+            <forward>0 1 0</forward>
+            <up>0 0 1</up>
+            <cp>0 0 0.05</cp>  <!-- Offset for torque -->
+            <debug>true</debug>  <!-- ADD DEBUG OUTPUT -->
+            <visualize>true</visualize>  <!-- VISUAL FORCES -->
+        </plugin>
+    </gazebo>
+
+    <gazebo>
+        <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
+            <link_name>right_wing</link_name>
+            <air_density>1.225</air_density>
+            <area>0.20674668328</area>
+            <cla>2.0</cla>
+            <cda>0.5</cda>
+            <alpha_stall>0.35</alpha_stall>
+            <forward>0 1 0</forward>
+            <up>0 0 1</up>
+            <cp>0 0 0.05</cp>
+            <debug>true</debug>
+            <visualize>true</visualize>
+        </plugin>
+    </gazebo>
+
+ 
+    <gazebo>
+        <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
+            <link_name>tail_left</link_name>
+            <air_density>1.225</air_density>
+            <area>0.05733020792</area>  <!-- Increased for testing -->
+            <cla>2.0</cla>    <!-- Increased lift -->
+            <cda>0.5</cda>     <!-- Increased drag -->
+            <alpha_stall>0.35</alpha_stall>
+            <forward>0 1 0</forward>
+            <up>0 0 1</up>
+            <cp>0 0 0.05</cp>  <!-- Offset for torque -->
+            <debug>true</debug>  <!-- ADD DEBUG OUTPUT -->
+            <visualize>true</visualize>  <!-- VISUAL FORCES -->
+        </plugin>
+    </gazebo>
+
+    <gazebo>
+        <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
+            <link_name>tail_right</link_name>
+            <air_density>1.225</air_density>
+            <area>0.05733020792</area>
+            <cla>2.0</cla>
+            <cda>0.5</cda>
+            <alpha_stall>0.35</alpha_stall>
+            <forward>0 1 0</forward>
+            <up>0 0 1</up>
+            <cp>0 0 0.05</cp>
+            <debug>true</debug>
+            <visualize>true</visualize>
+        </plugin>
+    </gazebo>
+
+    
+
+    <gazebo>
+        <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
+            <link_name>base_link_front</link_name>
+            <air_density>1.225</air_density>
+            <area>1.1425454568</area>
+            <cla>0.0</cla>
+            <cda>0.2</cda>  <!-- Increased drag -->
+            <alpha_stall>1.57</alpha_stall>
+            <forward>0 1 0</forward>
+            <up>0 0 1</up>
+            <debug>true</debug>
+        </plugin>
+    </gazebo>
+
+    <gazebo>
+        <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
+            <link_name>main_tail</link_name>
+            <air_density>1.225</air_density>
+            <area>0.1447926136</area>
+            <cla>0.0</cla>
+            <cda>0.15</cda>  <!-- Increased drag -->
+            <alpha_stall>1.57</alpha_stall>
+            <forward>0 1 0</forward>
+            <up>0 0 1</up>
+            <debug>true</debug>
+        </plugin>
+    </gazebo>
+
+
+    <gazebo reference="imu_link">
+      <sensor name="imu" type="imu">
+          <always_on>true</always_on>
+          <update_rate>100</update_rate>
+          <gz_frame_id>imu_link</gz_frame_id>
+          <topic>/imu</topic>
+          <imu>
+            <angular_velocity>
+              <x>
+                <noise type="gaussian">
+                  <mean>0.0</mean>
+                  <stddev>2e-4</stddev>
+                </noise>
+              </x>
+              <y>
+                <noise type="gaussian">
+                  <mean>0.0</mean>
+                  <stddev>2e-4</stddev>
+                </noise>
+              </y>
+              <z>
+                <noise type="gaussian">
+                  <mean>0.0</mean>
+                  <stddev>2e-4</stddev>
+                </noise>
+              </z>
+            </angular_velocity>
+            <linear_acceleration>
+              <x>
+                <noise type="gaussian">
+                  <mean>0.0</mean>
+                  <stddev>1.7e-2</stddev>
+                </noise>
+              </x>
+              <y>
+                <noise type="gaussian">
+                  <mean>0.0</mean>
+                  <stddev>1.7e-2</stddev>
+                </noise>
+              </y>
+              <z>
+                <noise type="gaussian">
+                  <mean>0.0</mean>
+                  <stddev>1.7e-2</stddev>
+                </noise>
+              </z>
+            </linear_acceleration>
+          </imu>
+      </sensor>
+    </gazebo>
+
+    <gazebo reference="gps_link">
+      <sensor name="gps_sensor" type="navsat">
+        <always_on>true</always_on>
+        <update_rate>10</update_rate> <!-- 10 Hz typical for consumer GPS -->
+        <topic>/gps/fix</topic>
+        <gz_frame_id>gps_link</gz_frame_id>
+        
+        <!-- GPS Noise Model (realistic consumer-grade GPS) -->
+        <navsat>
+          <!-- Horizontal position noise (standard deviation in meters) -->
+          <position_sensing>
+            <horizontal>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>2.5</stddev> <!-- 2m horizontal accuracy (consumer GPS) -->
+              </noise>
+            </horizontal>
+            <vertical>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>2.5</stddev> <!-- 4m vertical accuracy (worse than horizontal) -->
+              </noise>
+            </vertical>
+          </position_sensing>
+          
+          <!-- Velocity sensing (from Doppler shift) -->
+          <velocity_sensing>
+            <horizontal>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>1.5</stddev> <!-- 0.1 m/s velocity accuracy -->
+              </noise>
+            </horizontal>
+            <vertical>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>1.5</stddev>
+              </noise>
+            </vertical>
+          </velocity_sensing>
+        </navsat>
+      </sensor>
+    </gazebo>
+
+    <!-- Optional: Magnetometer for heading -->
+    <gazebo reference="imu_link">
+      <sensor name="magnetometer" type="magnetometer">
+        <always_on>true</always_on>
+        <update_rate>50</update_rate>
+        <topic>/magnetometer</topic>
+        <magnetometer>
+          <x>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+          </x>
+          <y>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+          </y>
+          <z>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+          </z>
+        </magnetometer>
+      </sensor>
+    </gazebo>
+
+
+    <gazebo reference="pitot_link">
+      <sensor name="airspeed" type="air_speed">
+        <always_on>true</always_on>
+        <update_rate>50</update_rate>
+        <topic>/airspeed</topic>
+        <air_speed>
+          <pressure>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.1</stddev> <!-- 0.1 m/s accuracy -->
+            </noise>
+          </pressure>
+        </air_speed>
+      </sensor>
+    </gazebo>
+
+
+
+    <gazebo reference="baro_link">
+      <sensor name="baro" type="air_pressure">
+        <update_rate>50</update_rate>
+        <always_on>true</always_on>
+        <topic>/baro/pressure</topic>
+        <noise type="gaussian">
+          <mean>0.0</mean>
+          <stddev>5.0</stddev>
+        </noise>
+      </sensor>
+    </gazebo>
+
+
+
+    <gazebo>
+          <xacro:if value="$(arg is_ignition)">
+              <plugin filename="ign_ros2_control-system" name="ign_ros2_control::IgnitionROS2ControlPlugin">
+                  <parameters>$(find marid_controller)/config/marid_controllers.yaml</parameters>
+              </plugin>
+
+
+              <plugin filename="gz-sim-imu-system" name="gz::sim::v8::systems::Imu"></plugin>
+
+              <!-- NavSat (GPS) System Plugin -->
+              <plugin filename="libgz-sim8-navsat-system" name="gz::sim::v8::systems::NavSat"></plugin>
+
+              <!-- Magnetometer System Plugin -->
+              <plugin filename="gz-sim-magnetometer-system" name="gz::sim::v8::systems::Magnetometer"></plugin>
+
+              <!-- Air Pressure (Barometer) System Plugin -->
+              <plugin filename="gz-sim-air-pressure-system" name="gz::sim::v8::systems::AirPressure"></plugin>
+
+              <!-- Air Speed (Pitot) System Plugin -->
+              <plugin filename="gz-sim-air-speed-system" name="gz::sim::v8::systems::AirSpeed"></plugin>
+
+
+          </xacro:if>
+
+
+          <xacro:unless value="$(arg is_ignition)">
+
+              <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+                  <parameters>$(find marid_controller)/config/marid_controllers.yaml</parameters>
+              </plugin>
+
+              <plugin filename="gz-sim-imu-system" name="gz::sim::v8::systems::Imu"></plugin>
+
+              <!-- NavSat (GPS) System Plugin -->
+              <plugin filename="libgz-sim8-navsat-system" name="gz::sim::v8::systems::NavSat"></plugin>
+
+              <!-- Magnetometer System Plugin -->
+              <plugin filename="gz-sim-magnetometer-system" name="gz::sim::v8::systems::Magnetometer"></plugin>
+
+              <!-- Air Pressure (Barometer) System Plugin -->
+              <plugin filename="gz-sim-air-pressure-system" name="gz::sim::v8::systems::AirPressure"></plugin>
+
+              <!-- Air Speed (Pitot) System Plugin -->
+              <plugin filename="gz-sim-air-speed-system" name="gz::sim::v8::systems::AirSpeed"></plugin>
+
+          </xacro:unless>
+      </gazebo>
+
+    
+
+</robot>

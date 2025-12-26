@@ -1,0 +1,38 @@
+# ROS2 build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Frame graphs (generated files)
+*.gv
+*.pdf
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+*.Zone.Identifier
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# ROS2 specific
+.colcon_install_layout
+.colcon_build_layout
+
