@@ -86,4 +86,19 @@ def generate_launch_description():
             output='screen',
             parameters=[{'use_sim_time': True}]
         ),
+        
+        # Convert Gazebo pose to odometry (ground truth)
+        Node(
+            package='marid_localization',
+            executable='gazebo_pose_to_odom.py',
+            name='gazebo_pose_to_odom',
+            output='screen',
+            parameters=[{
+                'model_name': 'marid',
+                'odom_frame_id': 'odom',
+                'base_frame_id': 'base_link_front',
+                'publish_tf': False,  # EKF handles TF
+                'use_sim_time': True,
+            }]
+        ),
     ])

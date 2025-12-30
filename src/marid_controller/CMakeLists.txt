@@ -28,6 +28,7 @@ install(
 install(PROGRAMS
   imu/imu.py
   marid_controller/marid_odom_pub.py
+  marid_controller/marid_thrust_controller.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

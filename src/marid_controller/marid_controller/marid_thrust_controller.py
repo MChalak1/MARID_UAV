@@ -1,0 +1,400 @@
+#!/usr/bin/env python3
+"""
+MARID Thrust Controller
+Applies thrust forces to individual thruster links to counter gravity and provide propulsion.
+Uses service-based approach: publishes directly to Gazebo using gz topic commands.
+Keyboard control: Up arrow = +10N, Down arrow = -10N (0-300N range)
+"""
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float64
+from nav_msgs.msg import Odometry
+import threading
+import sys
+import subprocess
+import os
+
+# Try to import pynput for keyboard control
+try:
+    from pynput import keyboard
+    PYNPUT_AVAILABLE = True
+except ImportError:
+    PYNPUT_AVAILABLE = False
+    print("Warning: pynput not available. Install with: pip install pynput")
+
+
+class MaridThrustController(Node):
+    def __init__(self):
+        super().__init__('marid_thrust_controller')
+        
+        # Parameters
+        self.declare_parameter('initial_thrust', 1.0)        # Initial thrust in Newtons
+        self.declare_parameter('min_thrust', 0.0)             # Minimum thrust (N)
+        self.declare_parameter('max_thrust', 30.0)           # Maximum thrust (N)
+        self.declare_parameter('thrust_increment', 1.0)       # Thrust increment per keypress (N)
+        self.declare_parameter('world_name', 'wt')            # Gazebo world name
+        self.declare_parameter('model_name', 'marid')         # Model name
+        self.declare_parameter('link_name', 'base_link_front') # Link to apply force to
+        self.declare_parameter('update_rate', 10.0)           # Update rate for persistent wrench (Hz)
+        self.declare_parameter('enable_keyboard', True)       # Enable keyboard control
+        self.declare_parameter('enable_differential', False)  # Enable differential thrust for yaw control
+        
+        self.initial_thrust_ = self.get_parameter('initial_thrust').value
+        self.min_thrust_ = self.get_parameter('min_thrust').value
+        self.max_thrust_ = self.get_parameter('max_thrust').value
+        self.thrust_increment_ = self.get_parameter('thrust_increment').value
+        self.world_name_ = self.get_parameter('world_name').value
+        self.model_name_ = self.get_parameter('model_name').value
+        self.link_name_ = self.get_parameter('link_name').value
+        self.enable_keyboard_ = self.get_parameter('enable_keyboard').value
+        self.enable_differential_ = self.get_parameter('enable_differential').value
+        
+        # Current thrust values in Newtons (absolute, not ratio)
+        self.current_thrust_ = self.initial_thrust_
+        self.left_thrust_ = self.initial_thrust_
+        self.right_thrust_ = self.initial_thrust_
+        
+        # Lock for thread-safe access to thrust values
+        self.thrust_lock_ = threading.Lock()
+        
+        # Differential thrust for yaw control (will be set by attitude controller)
+        self.yaw_differential_ = 0.0  # -1.0 to 1.0, negative = yaw left, positive = yaw right
+        
+        # Use ApplyLinkWrench plugin (in world) via direct gz topic publishing
+        # Use persistent topic (applies continuously until cleared or updated)
+        self.world_name_ = self.get_parameter('world_name').value
+        self.wrench_topic_ = f'/world/{self.world_name_}/wrench/persistent'
+        
+        # Subscribe to thrust commands (in Newtons)
+        self.left_thrust_sub_ = self.create_subscription(
+            Float64,
+            '/marid/thrust/left',
+            self.left_thrust_callback,
+            10
+        )
+        
+        self.right_thrust_sub_ = self.create_subscription(
+            Float64,
+            '/marid/thrust/right',
+            self.right_thrust_callback,
+            10
+        )
+        
+        # Subscribe to combined thrust command (applied to both thrusters equally, in Newtons)
+        self.total_thrust_sub_ = self.create_subscription(
+            Float64,
+            '/marid/thrust/total',
+            self.total_thrust_callback,
+            10
+        )
+        
+        # Subscribe to yaw differential command (for differential thrust control)
+        self.yaw_differential_sub_ = self.create_subscription(
+            Float64,
+            '/marid/thrust/yaw_differential',
+            self.yaw_differential_callback,
+            10
+        )
+        
+        # Subscribe to odometry for altitude/velocity feedback (optional, for future auto-thrust)
+        self.odom_sub_ = self.create_subscription(
+            Odometry,
+            '/odometry/filtered/local',
+            self.odom_callback,
+            10
+        )
+        
+        # Current state (for future altitude/velocity control)
+        self.current_altitude_ = 0.0
+        self.current_velocity_ = 0.0
+        
+        # Timer to apply wrench commands via gz topic
+        # Start with a delay to ensure model is spawned first
+        update_period = 1.0 / self.get_parameter('update_rate').value
+        
+        # Flag to track if we've started applying thrust
+        self.thrust_started_ = False
+        self.start_time_ = self.get_clock().now()
+        self.start_delay_ = 4.0  # Wait 4 seconds before starting
+        
+        # Simple approach: wait 4 seconds (model spawns after 3 seconds in launch file)
+        # Then start applying thrust
+        self.get_logger().info('Will start applying thrust after 4 seconds...')
+        
+        # Create a timer that checks if delay has passed (runs every 0.1s until started)
+        self.create_timer(0.1, self.check_and_start_thrust)
+        
+        # Create the main thrust application timer (it will check the flag before applying)
+        self.thrust_timer_ = self.create_timer(update_period, self.apply_thrust)
+        
+        # Start keyboard listener in a separate thread
+        self.keyboard_listener_ = None
+        if self.enable_keyboard_ and PYNPUT_AVAILABLE:
+            self.start_keyboard_listener()
+        elif self.enable_keyboard_ and not PYNPUT_AVAILABLE:
+            self.get_logger().warn('Keyboard control requested but pynput not available. Install with: pip install pynput')
+        
+        self.get_logger().info('MARID Thrust Controller initialized (Service-based)')
+        self.get_logger().info(f'World: {self.world_name_}, Model: {self.model_name_}, Link: {self.link_name_}')
+        self.get_logger().info(f'Initial thrust: {self.initial_thrust_:.2f} N per thruster')
+        self.get_logger().info(f'Thrust range: {self.min_thrust_:.2f} - {self.max_thrust_:.2f} N')
+        self.get_logger().info(f'Thrust increment: {self.thrust_increment_:.2f} N per keypress')
+        if self.enable_keyboard_ and PYNPUT_AVAILABLE:
+            self.get_logger().info('Keyboard control: UP arrow = +1N, DOWN arrow = -1N')
+        self.get_logger().info(f'Differential thrust: {"enabled" if self.enable_differential_ else "disabled"}')
+        self.get_logger().info(f'Using ApplyLinkWrench plugin via: {self.wrench_topic_}')
+        self.get_logger().info(f'Entity ID: 11 (base_link_front)')
+        self.get_logger().info('Publishing EntityWrench messages directly to Gazebo using gz topic commands')
+        self.get_logger().info('Checking for model spawn before applying thrust...')
+    
+    def start_keyboard_listener(self):
+        """Start keyboard listener in a separate thread"""
+        def on_press(key):
+            try:
+                if key == keyboard.Key.up:
+                    self.increment_thrust()
+                elif key == keyboard.Key.down:
+                    self.decrement_thrust()
+            except AttributeError:
+                # Special keys (like arrow keys) handled above
+                pass
+        
+        def on_release(key):
+            # Don't do anything on release
+            pass
+        
+        # Start listener in a separate thread
+        self.keyboard_listener_ = keyboard.Listener(
+            on_press=on_press,
+            on_release=on_release
+        )
+        self.keyboard_listener_.start()
+        self.get_logger().info('Keyboard listener started')
+    
+    def increment_thrust(self):
+        """Increment thrust by thrust_increment_"""
+        with self.thrust_lock_:
+            new_thrust = min(self.current_thrust_ + self.thrust_increment_, self.max_thrust_)
+            if new_thrust != self.current_thrust_:
+                self.current_thrust_ = new_thrust
+                self.left_thrust_ = new_thrust
+                self.right_thrust_ = new_thrust
+                self.get_logger().info(f'Thrust increased to {self.current_thrust_:.2f} N')
+                # Immediately apply the new thrust
+                self.apply_thrust()
+    
+    def decrement_thrust(self):
+        """Decrement thrust by thrust_increment_"""
+        with self.thrust_lock_:
+            new_thrust = max(self.current_thrust_ - self.thrust_increment_, self.min_thrust_)
+            if new_thrust != self.current_thrust_:
+                self.current_thrust_ = new_thrust
+                self.left_thrust_ = new_thrust
+                self.right_thrust_ = new_thrust
+                self.get_logger().info(f'Thrust decreased to {self.current_thrust_:.2f} N')
+                # Immediately apply the new thrust
+                self.apply_thrust()
+    
+    def left_thrust_callback(self, msg):
+        """Set left thruster command (in Newtons)"""
+        with self.thrust_lock_:
+            self.left_thrust_ = max(self.min_thrust_, min(self.max_thrust_, msg.data))
+            self.get_logger().debug(f'Left thrust command: {self.left_thrust_:.2f} N')
+    
+    def right_thrust_callback(self, msg):
+        """Set right thruster command (in Newtons)"""
+        with self.thrust_lock_:
+            self.right_thrust_ = max(self.min_thrust_, min(self.max_thrust_, msg.data))
+            self.get_logger().debug(f'Right thrust command: {self.right_thrust_:.2f} N')
+    
+    def total_thrust_callback(self, msg):
+        """Set both thrusters to the same value (in Newtons)"""
+        with self.thrust_lock_:
+            thrust = max(self.min_thrust_, min(self.max_thrust_, msg.data))
+            self.current_thrust_ = thrust
+            self.left_thrust_ = thrust
+            self.right_thrust_ = thrust
+            self.get_logger().debug(f'Total thrust command: {thrust:.2f} N')
+    
+    def yaw_differential_callback(self, msg):
+        """Set yaw differential (-1.0 to 1.0)
+        Negative = more left thrust (yaw right)
+        Positive = more right thrust (yaw left)
+        """
+        if self.enable_differential_:
+            self.yaw_differential_ = max(-1.0, min(1.0, msg.data))
+            self.get_logger().debug(f'Yaw differential: {self.yaw_differential_:.3f}')
+    
+    def odom_callback(self, msg):
+        """Store current altitude and velocity for future auto-thrust control"""
+        self.current_altitude_ = msg.pose.pose.position.z
+        linear_vel = msg.twist.twist.linear
+        self.current_velocity_ = (linear_vel.x**2 + linear_vel.y**2 + linear_vel.z**2)**0.5
+    
+    def calculate_thrust_values(self):
+        """Calculate left and right thrust values with optional differential control"""
+        with self.thrust_lock_:
+            if self.enable_differential_:
+                # Apply differential thrust for yaw control
+                # yaw_differential > 0 means yaw left, so increase right thrust
+                # yaw_differential < 0 means yaw right, so increase left thrust
+                differential_gain = 0.2  # Max 20% differential
+                base_thrust = self.current_thrust_
+                differential = self.yaw_differential_ * differential_gain * base_thrust
+                
+                left_thrust = self.left_thrust_ - differential
+                right_thrust = self.right_thrust_ + differential
+            else:
+                # Equal thrust to both (simplified mode)
+                left_thrust = self.left_thrust_
+                right_thrust = self.right_thrust_
+            
+            # Clamp to valid range
+            left_thrust = max(self.min_thrust_, min(self.max_thrust_, left_thrust))
+            right_thrust = max(self.min_thrust_, min(self.max_thrust_, right_thrust))
+            
+            return left_thrust, right_thrust
+    
+    def check_and_start_thrust(self):
+        """Check if delay has passed and start applying thrust"""
+        if self.thrust_started_:
+            return  # Already started
+        
+        elapsed = (self.get_clock().now() - self.start_time_).nanoseconds / 1e9
+        
+        if elapsed >= self.start_delay_:
+            self.get_logger().info(f'=== STARTING THRUST APPLICATION (after {elapsed:.1f}s) ===')
+            self.thrust_started_ = True
+            self.get_logger().info('Thrust flag set to True. Applying initial thrust...')
+            # Apply initial thrust immediately
+            self.apply_thrust()
+            self.get_logger().info('Initial thrust call completed. Timer will continue at 10 Hz.')
+    
+    def apply_thrust(self):
+        """Apply thrust using gz topic command to publish EntityWrench to ApplyLinkWrench plugin"""
+        # Don't apply thrust until model is spawned
+        if not self.thrust_started_:
+            return
+        
+        left_thrust, right_thrust = self.calculate_thrust_values()
+        total_thrust = left_thrust + right_thrust
+        
+        # Create EntityWrench message in protobuf text format (not JSON!)
+        # gz topic -p expects protobuf DebugString format
+        # Use entity ID instead of name (more reliable)
+        # Entity ID 11 = base_link_front (from gz model -m marid -l output)
+        # If entity ID changes, we can query it dynamically, but for now use fixed ID
+        entity_id = 11  # base_link_front link ID
+        
+        # Protobuf text format using entity ID
+        # To apply force at center of mass (offset: 0, 0.1, 0.02 from link origin),
+        # we need to add compensating torque: torque = offset × force
+        # offset = (0, 0.1, 0.02), force = (0, total_thrust, 0)
+        # torque = offset × force = (0.1*0 - 0.02*total_thrust, 0.02*0 - 0*0, 0*0 - 0.1*0)
+        # torque = (-0.02*total_thrust, 0, 0)  [cross product]
+        # Actually: torque_x = offset_y * force_z - offset_z * force_y = 0.1*0 - 0.02*total_thrust = -0.02*total_thrust
+        #          torque_y = offset_z * force_x - offset_x * force_z = 0.02*0 - 0*0 = 0
+        #          torque_z = offset_x * force_y - offset_y * force_x = 0*total_thrust - 0.1*0 = 0
+        compensating_torque_x = -0.02 * total_thrust  # Negative because force is +Y, offset is +Z
+        
+        entity_wrench_proto = f'''entity {{
+  id: {entity_id}
+}}
+wrench {{
+  force {{
+    x: 0.0
+    y: {total_thrust}
+    z: 0.0
+  }}
+  torque {{
+    x: {compensating_torque_x}
+    y: 0.0
+    z: 0.0
+  }}
+}}'''
+        
+        # Use gz topic pub to publish directly to Gazebo (bypasses bridge issues)
+        try:
+            # Ensure we have the full path to gz or use shell=True
+            env = dict(os.environ)
+            # Use shell=True to ensure proper PATH resolution and environment
+            cmd_str = f'gz topic -t {self.wrench_topic_} -m gz.msgs.EntityWrench -p \'{entity_wrench_proto}\''
+            
+            result = subprocess.run(
+                cmd_str,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                env=env,
+                executable='/bin/bash'
+            )
+            
+            if result.returncode != 0:
+                # Log errors every time to debug
+                self.get_logger().error(f'gz topic command failed (code {result.returncode})')
+                if result.stderr:
+                    self.get_logger().error(f'stderr: {result.stderr[:300]}')
+                if result.stdout:
+                    self.get_logger().error(f'stdout: {result.stdout[:300]}')
+                # Log the command for debugging (first time only to avoid spam)
+                if not hasattr(self, '_cmd_logged'):
+                    self.get_logger().error(f'Failed command: {cmd_str[:200]}')
+                    self.get_logger().error(f'Message payload: {entity_wrench_proto[:200]}')
+                    self._cmd_logged = True
+            else:
+                # Command succeeded - log occasionally
+                if not hasattr(self, '_success_counter'):
+                    self._success_counter = 0
+                self._success_counter += 1
+                if self._success_counter == 1:
+                    self.get_logger().info('gz topic command succeeded! Thrust should be applied.')
+                elif self._success_counter % 50 == 0:
+                    self.get_logger().debug(f'gz topic command succeeded ({self._success_counter} times)')
+            
+        except subprocess.TimeoutExpired:
+            if not hasattr(self, '_timeout_logged'):
+                self.get_logger().error('gz topic command timed out')
+                self._timeout_logged = True
+        except Exception as e:
+            if not hasattr(self, '_exception_logged'):
+                self.get_logger().error(f'Error publishing wrench: {str(e)[:200]}')
+                self._exception_logged = True
+        
+        # Log periodically (every 5 seconds at 10 Hz = every 50 calls)
+        if hasattr(self, '_log_counter'):
+            self._log_counter += 1
+        else:
+            self._log_counter = 0
+        
+        if self._log_counter % 50 == 0:
+            with self.thrust_lock_:
+                current = self.current_thrust_
+            self.get_logger().info(
+                f'Applying thrust via ApplyLinkWrench: L={left_thrust:.2f}N, R={right_thrust:.2f}N, Total={total_thrust:.2f}N (Current: {current:.2f}N)'
+            )
+            self.get_logger().info(f'Topic: {self.wrench_topic_}, Entity ID: {entity_id} (base_link_front)')
+            # Log the actual command being executed
+            self.get_logger().debug(f'Protobuf message: {entity_wrench_proto[:200]}')
+    
+    def destroy_node(self):
+        """Clean up keyboard listener on shutdown"""
+        if self.keyboard_listener_ is not None:
+            self.keyboard_listener_.stop()
+        super().destroy_node()
+
+
+def main():
+    rclpy.init()
+    node = MaridThrustController()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

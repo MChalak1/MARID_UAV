@@ -2,7 +2,7 @@
 ekf_filter_node_odom:
   ros__parameters:
     frequency: 50.0
-    sensor_timeout: 0.1
+    sensor_timeout: 1.0  # Increased timeout to allow sensors to initialize
     two_d_mode: false  # 3D for fixed-wing
     
     # Frame configuration
@@ -22,6 +22,7 @@ ekf_filter_node_odom:
                     0.0, 0.0, 0.0]    # ax, ay, az
     
     # IMU configuration (from /imu_ekf topic)
+    # IMU is REQUIRED for EKF to start publishing TF
     imu0: /imu_ekf
     imu0_config: [false, false, false,   # IMU does NOT provide position!
                   true,  true,  true,    # roll, pitch, yaw (orientation)
@@ -34,6 +35,7 @@ ekf_filter_node_odom:
     imu0_remove_gravitational_acceleration: true
     
     # Barometer configuration (converts pressure to altitude)
+    # Barometer is optional - EKF can work without it
     pose0: /barometer/altitude  # After conversion to PoseWithCovarianceStamped
     pose0_config: [false, false, true,    # Only use Z position
                    false, false, false,
@@ -44,8 +46,34 @@ ekf_filter_node_odom:
     pose0_relative: false
     pose0_queue_size: 5
     
-    # REMOVED odom0 to break circular dependency!
-    # The EKF will generate odometry from IMU + barometer directly
+    # Gazebo ground truth odometry (PRIMARY - provides accurate X, Y, Z from Gazebo)
+    # This is the main source for position since IMU odometry doesn't work for manual movement
+    # NOTE: EKF can publish TF with just IMU, but position will be 0,0,5 until this arrives
+    odom0: /gazebo/odom
+    odom0_config: [true,  true,  true,    # Use X, Y, Z position from Gazebo (ground truth)
+                   false, false, false,    # Don't use orientation (use IMU instead)
+                   true,  true,  true,     # Use X, Y, Z velocities
+                   false, false, false,
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative: false
+    odom0_queue_size: 10
+    odom0_pose_rejection_threshold: 100.0  # Very permissive for ground truth
+    odom0_twist_rejection_threshold: 50.0
+    
+    # IMU-based odometry (SECONDARY - fallback if Gazebo pose not available)
+    # Note: X/Y will be 0.0 if drone is moved manually (no physics acceleration)
+    odom1: /marid/odom
+    odom1_config: [false, false, true,    # Only use Z position from IMU (X/Y are unreliable)
+                   true,  true,  true,    # Use orientation (will be refined by IMU)
+                   false, false, true,    # Only use Z velocity
+                   false, false, false,
+                   false, false, false]
+    odom1_differential: false
+    odom1_relative: false
+    odom1_queue_size: 10
+    odom1_pose_rejection_threshold: 100.0
+    odom1_twist_rejection_threshold: 50.0
     
     # Process noise covariance (tune these based on your sensor quality)
     # Order: x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
@@ -69,7 +97,7 @@ ekf_filter_node_odom:
 ekf_filter_node_map:
   ros__parameters:
     frequency: 30.0
-    sensor_timeout: 0.1
+    sensor_timeout: 1.0  # Increased timeout to allow sensors to initialize
     two_d_mode: false
     
     # Frame configuration
@@ -78,6 +106,8 @@ ekf_filter_node_map:
     base_link_frame: base_link_front
     world_frame: map
     
+    # Publish TF: map -> base_link_front
+    # Local EKF publishes odom -> base_link_front (different parent frame, no conflict)
     publish_tf: true
     publish_acceleration: false
     

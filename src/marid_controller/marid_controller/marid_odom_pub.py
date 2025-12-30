@@ -26,6 +26,7 @@ class MaridOdomPublisher(Node):
         self.declare_parameter("base_velocity_variance", 0.1)
         self.declare_parameter("variance_growth_rate", 0.001)  # per second
         self.declare_parameter("child_frame_id", "base_link_front")
+        self.declare_parameter("publish_tf", False)  # Let EKF handle TF publishing
         
         # Get parameters
         self.accel_is_sf_ = self.get_parameter("imu_outputs_specific_force").value
@@ -38,6 +39,7 @@ class MaridOdomPublisher(Node):
         self.base_vel_var_ = self.get_parameter("base_velocity_variance").value
         self.var_growth_rate_ = self.get_parameter("variance_growth_rate").value
         self.child_frame_id_ = self.get_parameter("child_frame_id").value
+        self.publish_tf_ = self.get_parameter("publish_tf").value
         
         # State variables
         self.x_ = 0.0
@@ -288,7 +290,8 @@ class MaridOdomPublisher(Node):
         
         self.odom_pub_.publish(self.odom_msg_)
         
-        # Broadcast TF
+        # Broadcast TF only if enabled (EKF should handle TF publishing)
+        if self.publish_tf_:
         self.transform_stamped_.header.stamp = now.to_msg()
         self.transform_stamped_.transform.translation.x = self.x_
         self.transform_stamped_.transform.translation.y = self.y_

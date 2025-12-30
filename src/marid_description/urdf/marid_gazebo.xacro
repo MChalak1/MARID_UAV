@@ -11,8 +11,6 @@
     <gazebo reference="main_tail"><enable_wind>true</enable_wind></gazebo>
     <gazebo reference="tail_right"><enable_wind>true</enable_wind></gazebo>
     <gazebo reference="tail_left"><enable_wind>true</enable_wind></gazebo>
-    <gazebo reference="thruster_L"></gazebo>
-    <gazebo reference="thruster_R"></gazebo>
 
 
 
@@ -295,6 +293,17 @@
       </sensor>
     </gazebo>
 
+    <!-- Pose Publisher Plugin - publishes model pose for localization -->
+    <gazebo reference="base_link_front">
+      <plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher">
+        <publish_link_pose>true</publish_link_pose>
+        <publish_sensor_pose>false</publish_sensor_pose>
+        <publish_nested_model_pose>false</publish_nested_model_pose>
+        <use_pose_vector_msg>true</use_pose_vector_msg>
+        <update_rate>50</update_rate>
+      </plugin>
+    </gazebo>
+
 
 
     <gazebo>
@@ -345,6 +354,8 @@
           </xacro:unless>
       </gazebo>
 
-    
+    <!-- Thruster plugin removed - it requires a joint (for rotating propellers) -->
+    <!-- For fixed-wing aircraft, we use ApplyLinkWrench plugin (already in world) -->
+    <!-- Force is applied via /world/wt/wrench/persistent topic with EntityWrench messages -->
 
 </robot>

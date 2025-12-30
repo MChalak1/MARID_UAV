@@ -3,7 +3,7 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable, TimerAction
 from launch.substitutions import Command, LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
@@ -42,14 +42,6 @@ def generate_launch_description():
     )
 
 
-    """gazebo = IncludeLaunchDescription(
-                PythonLaunchDescriptionSource([os.path.join(
-                    get_package_share_directory("ros_gz_sim"), "launch"), "/gz_sim.launch.py"]),
-                launch_arguments=[
-                    ("gz_args", [" -v 4", " -r", " empty.sdf"]
-                    )
-                ]
-    )"""
 
 
     world_path = os.path.join(get_package_share_directory("marid_description"),
@@ -68,13 +60,19 @@ def generate_launch_description():
 
 
 
-    gz_spawn_entity = Node(
-        package="ros_gz_sim",
-        executable="create",
-        output="screen",
-        arguments=["-topic", "robot_description",
-                   "-name", "marid",
-                   "-x", "0", "-y", "0", "-z", "5.0"]
+    # Wait for world to load before spawning entity
+    gz_spawn_entity = TimerAction(
+        period=3.0,  # Wait 3 seconds for world to fully load
+        actions=[
+            Node(
+                package="ros_gz_sim",
+                executable="create",
+                output="screen",
+                arguments=["-topic", "robot_description",
+                           "-name", "marid",
+                           "-x", "0", "-y", "0", "-z", "5.0"]
+            )
+        ]
     )
 
     imu_bridge = Node(
@@ -84,9 +82,22 @@ def generate_launch_description():
         "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
         "/imu@sensor_msgs/msg/Imu[gz.msgs.IMU",
         "/baro/pressure@sensor_msgs/msg/FluidPressure[gz.msgs.FluidPressure",
-        "/gps/fix@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat"
+        "/gps/fix@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat",
+        "/world/wt/state@gz.msgs.World[gz.msgs.World"
+        # Thruster bridge removed - using ApplyLinkWrench plugin directly via gz topic commands
     ],
     output='screen'
+    )
+
+    # Include localization launch file
+    localization_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory("marid_localization"),
+                "launch",
+                "local_localization.launch.py"
+            )
+        ])
     )
 
     return LaunchDescription([
@@ -95,5 +106,6 @@ def generate_launch_description():
         robot_state_publisher_node,
         gazebo,
         gz_spawn_entity,
-        imu_bridge
+        imu_bridge,
+        localization_launch
     ])

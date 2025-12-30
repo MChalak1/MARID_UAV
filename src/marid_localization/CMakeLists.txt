@@ -26,6 +26,7 @@ install(PROGRAMS
   marid_localization/baro_to_alt.py
   marid_localization/imu_republisher.py
   marid_localization/marid_pose_reader.py
+  marid_localization/gazebo_pose_to_odom.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
