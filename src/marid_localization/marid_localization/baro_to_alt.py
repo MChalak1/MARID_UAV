@@ -44,10 +44,21 @@ class BarometerConverter(Node):
         Convert atmospheric pressure to altitude using barometric formula.
         Using the standard atmosphere model.
         """
+        # Validate input pressure
+        if math.isnan(pressure) or math.isinf(pressure) or pressure <= 0:
+            return float('nan')
+        
         # Barometric formula for altitude
+        try:
         altitude = (self.T_ / self.L) * (1.0 - math.pow(pressure / self.p0_, 
                                          (self.R * self.L) / self.g))
+            # Validate output
+            if math.isnan(altitude) or math.isinf(altitude):
+                return float('nan')
         return altitude
+        except (ValueError, OverflowError) as e:
+            self.get_logger().warn(f'Error calculating altitude from pressure {pressure}: {e}')
+            return float('nan')
     
     
 
@@ -55,12 +66,25 @@ class BarometerConverter(Node):
         """Convert pressure measurement to altitude pose"""
         pressure = msg.fluid_pressure
         
-        # Debug logging
-        # self.get_logger().info(f'Received pressure: {pressure} Pa')
+        # Validate pressure is valid
+        if math.isnan(pressure) or math.isinf(pressure) or pressure <= 0 or pressure > 200000:
+            if not hasattr(self, '_invalid_pressure_count'):
+                self._invalid_pressure_count = 0
+            self._invalid_pressure_count += 1
+            if self._invalid_pressure_count % 50 == 0:  # Log periodically
+                self.get_logger().warn(f'Invalid pressure reading: {pressure} Pa, skipping')
+            return
         
         altitude = self.pressure_to_altitude(pressure)
         
-        # self.get_logger().info(f'Calculated altitude: {altitude:.2f} m')
+        # Validate altitude is valid
+        if math.isnan(altitude) or math.isinf(altitude):
+            if not hasattr(self, '_invalid_altitude_count'):
+                self._invalid_altitude_count = 0
+            self._invalid_altitude_count += 1
+            if self._invalid_altitude_count % 50 == 0:  # Log periodically
+                self.get_logger().warn(f'Calculated invalid altitude: {altitude} m from pressure {pressure} Pa, skipping')
+            return
         
         # Create pose message with only Z position
         pose_msg = PoseWithCovarianceStamped()

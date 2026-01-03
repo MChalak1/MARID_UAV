@@ -10,6 +10,7 @@ from tf2_ros import TransformBroadcaster
 from tf_transformations import quaternion_matrix
 from std_srvs.srv import Empty
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+import math
 
 class MaridOdomPublisher(Node):
     def __init__(self):
@@ -243,6 +244,23 @@ class MaridOdomPublisher(Node):
         
         now = self.get_clock().now()
         
+        # Validate state variables are not NaN or infinite before publishing
+        if (math.isnan(self.x_) or math.isnan(self.y_) or math.isnan(self.z_) or
+            math.isnan(self.vx_) or math.isnan(self.vy_) or math.isnan(self.vz_) or
+            math.isnan(self.qx_) or math.isnan(self.qy_) or math.isnan(self.qz_) or math.isnan(self.qw_) or
+            math.isinf(self.x_) or math.isinf(self.y_) or math.isinf(self.z_) or
+            math.isinf(self.vx_) or math.isinf(self.vy_) or math.isinf(self.vz_) or
+            math.isinf(self.qx_) or math.isinf(self.qy_) or math.isinf(self.qz_) or math.isinf(self.qw_)):
+            if not hasattr(self, '_nan_warn_count'):
+                self._nan_warn_count = 0
+            self._nan_warn_count += 1
+            if self._nan_warn_count % 50 == 0:  # Log periodically
+                self.get_logger().warn('State variables contain NaN or infinite values, skipping odometry publication')
+                self.get_logger().warn(f'  Position: x={self.x_}, y={self.y_}, z={self.z_}')
+                self.get_logger().warn(f'  Velocity: vx={self.vx_}, vy={self.vy_}, vz={self.vz_}')
+                self.get_logger().warn(f'  Orientation: qx={self.qx_}, qy={self.qy_}, qz={self.qz_}, qw={self.qw_}')
+            return  # Don't publish invalid data
+        
         # Calculate growing covariance based on time since start
         elapsed_time = (now - self.start_time_).nanoseconds / 1e9
         pos_variance = self.base_pos_var_ + self.var_growth_rate_ * elapsed_time
@@ -292,15 +310,15 @@ class MaridOdomPublisher(Node):
         
         # Broadcast TF only if enabled (EKF should handle TF publishing)
         if self.publish_tf_:
-        self.transform_stamped_.header.stamp = now.to_msg()
-        self.transform_stamped_.transform.translation.x = self.x_
-        self.transform_stamped_.transform.translation.y = self.y_
-        self.transform_stamped_.transform.translation.z = self.z_
-        self.transform_stamped_.transform.rotation.x = self.qx_
-        self.transform_stamped_.transform.rotation.y = self.qy_
-        self.transform_stamped_.transform.rotation.z = self.qz_
-        self.transform_stamped_.transform.rotation.w = self.qw_
-        self.br_.sendTransform(self.transform_stamped_)
+            self.transform_stamped_.header.stamp = now.to_msg()
+            self.transform_stamped_.transform.translation.x = self.x_
+            self.transform_stamped_.transform.translation.y = self.y_
+            self.transform_stamped_.transform.translation.z = self.z_
+            self.transform_stamped_.transform.rotation.x = self.qx_
+            self.transform_stamped_.transform.rotation.y = self.qy_
+            self.transform_stamped_.transform.rotation.z = self.qz_
+            self.transform_stamped_.transform.rotation.w = self.qw_
+            self.br_.sendTransform(self.transform_stamped_)
         
         # Publish diagnostics periodically (every 2 seconds)
         if self.integration_count_ % (int(self.publish_rate_) * 2) == 0:

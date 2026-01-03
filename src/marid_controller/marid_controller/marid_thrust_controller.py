@@ -13,6 +13,7 @@ import threading
 import sys
 import subprocess
 import os
+import time
 
 # Try to import pynput for keyboard control
 try:
@@ -314,53 +315,76 @@ wrench {{
 }}'''
         
         # Use gz topic pub to publish directly to Gazebo (bypasses bridge issues)
-        try:
-            # Ensure we have the full path to gz or use shell=True
-            env = dict(os.environ)
-            # Use shell=True to ensure proper PATH resolution and environment
-            cmd_str = f'gz topic -t {self.wrench_topic_} -m gz.msgs.EntityWrench -p \'{entity_wrench_proto}\''
-            
-            result = subprocess.run(
-                cmd_str,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=2.0,
-                env=env,
-                executable='/bin/bash'
-            )
-            
-            if result.returncode != 0:
-                # Log errors every time to debug
-                self.get_logger().error(f'gz topic command failed (code {result.returncode})')
-                if result.stderr:
-                    self.get_logger().error(f'stderr: {result.stderr[:300]}')
-                if result.stdout:
-                    self.get_logger().error(f'stdout: {result.stdout[:300]}')
-                # Log the command for debugging (first time only to avoid spam)
-                if not hasattr(self, '_cmd_logged'):
-                    self.get_logger().error(f'Failed command: {cmd_str[:200]}')
-                    self.get_logger().error(f'Message payload: {entity_wrench_proto[:200]}')
-                    self._cmd_logged = True
-            else:
-                # Command succeeded - log occasionally
-                if not hasattr(self, '_success_counter'):
-                    self._success_counter = 0
-                self._success_counter += 1
-                if self._success_counter == 1:
-                    self.get_logger().info('gz topic command succeeded! Thrust should be applied.')
-                elif self._success_counter % 50 == 0:
-                    self.get_logger().debug(f'gz topic command succeeded ({self._success_counter} times)')
-            
-        except subprocess.TimeoutExpired:
-            if not hasattr(self, '_timeout_logged'):
-                self.get_logger().error('gz topic command timed out')
-                self._timeout_logged = True
-        except Exception as e:
-            if not hasattr(self, '_exception_logged'):
-                self.get_logger().error(f'Error publishing wrench: {str(e)[:200]}')
-                self._exception_logged = True
+        # Retry up to 3 times with increasing timeout
+        max_retries = 3
+        timeout = 5.0  # Increased from 2.0 to 5.0 seconds
         
+        for attempt in range(max_retries):
+            try:
+                # Ensure we have the full path to gz or use shell=True
+                env = dict(os.environ)
+                # Use shell=True to ensure proper PATH resolution and environment
+                cmd_str = f'gz topic -t {self.wrench_topic_} -m gz.msgs.EntityWrench -p \'{entity_wrench_proto}\''
+                
+                result = subprocess.run(
+                    cmd_str,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    env=env,
+                    executable='/bin/bash'
+                )
+                
+                if result.returncode == 0:
+                    # Command succeeded
+                    if not hasattr(self, '_success_counter'):
+                        self._success_counter = 0
+                    self._success_counter += 1
+                    if self._success_counter == 1:
+                        self.get_logger().info('gz topic command succeeded! Thrust should be applied.')
+                    elif self._success_counter % 50 == 0:
+                        self.get_logger().debug(f'gz topic command succeeded ({self._success_counter} times)')
+                    return  # Success, exit retry loop
+                else:
+                    # Command failed but didn't timeout
+                    if attempt == max_retries - 1:  # Last attempt
+                        self.get_logger().error(f'gz topic command failed after {max_retries} attempts (code {result.returncode})')
+                        if result.stderr:
+                            self.get_logger().error(f'stderr: {result.stderr[:300]}')
+                        if result.stdout:
+                            self.get_logger().error(f'stdout: {result.stdout[:300]}')
+                        if not hasattr(self, '_cmd_logged'):
+                            self.get_logger().error(f'Failed command: {cmd_str[:200]}')
+                            self.get_logger().error(f'Message payload: {entity_wrench_proto[:200]}')
+                            self._cmd_logged = True
+                    else:
+                        self.get_logger().warn(f'gz topic command failed (attempt {attempt + 1}/{max_retries}), retrying...')
+                        time.sleep(0.5)  # Brief delay before retry
+                        continue
+                
+            except subprocess.TimeoutExpired:
+                if attempt == max_retries - 1:  # Last attempt
+                    self.get_logger().error(f'gz topic command timed out after {max_retries} attempts. Is Gazebo running?')
+                    if not hasattr(self, '_timeout_logged'):
+                        self.get_logger().error('Make sure Gazebo is running and the model is spawned before starting the thrust controller.')
+                        self._timeout_logged = True
+                else:
+                    self.get_logger().warn(f'gz topic command timed out (attempt {attempt + 1}/{max_retries}), retrying with longer timeout...')
+                    timeout += 2.0  # Increase timeout for next attempt
+                    time.sleep(0.5)
+                    continue
+            except Exception as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    if not hasattr(self, '_exception_logged'):
+                        self.get_logger().error(f'Error publishing wrench after {max_retries} attempts: {str(e)[:200]}')
+                        self._exception_logged = True
+                else:
+                    self.get_logger().warn(f'Error on attempt {attempt + 1}/{max_retries}: {str(e)[:100]}, retrying...')
+                    time.sleep(0.5)
+                    continue
+        
+        # If we get here, all retries failed
         # Log periodically (every 5 seconds at 10 Hz = every 50 calls)
         if hasattr(self, '_log_counter'):
             self._log_counter += 1
@@ -370,12 +394,11 @@ wrench {{
         if self._log_counter % 50 == 0:
             with self.thrust_lock_:
                 current = self.current_thrust_
-            self.get_logger().info(
-                f'Applying thrust via ApplyLinkWrench: L={left_thrust:.2f}N, R={right_thrust:.2f}N, Total={total_thrust:.2f}N (Current: {current:.2f}N)'
+            self.get_logger().warn(
+                f'Failed to apply thrust via ApplyLinkWrench: L={left_thrust:.2f}N, R={right_thrust:.2f}N, Total={total_thrust:.2f}N (Current: {current:.2f}N)'
             )
-            self.get_logger().info(f'Topic: {self.wrench_topic_}, Entity ID: {entity_id} (base_link_front)')
-            # Log the actual command being executed
-            self.get_logger().debug(f'Protobuf message: {entity_wrench_proto[:200]}')
+            self.get_logger().warn(f'Topic: {self.wrench_topic_}, Entity ID: {entity_id} (base_link_front)')
+            self.get_logger().warn('Check that Gazebo is running and the model is spawned.')
     
     def destroy_node(self):
         """Clean up keyboard listener on shutdown"""

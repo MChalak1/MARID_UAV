@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.substitutions import LaunchConfiguration, Command
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -42,6 +42,10 @@ def generate_launch_description():
         ),
         
         # Local EKF - fuses IMU + Barometer
+        # Delay startup by 3 seconds to allow sensors to initialize and publish valid data
+        TimerAction(
+            period=3.0,
+            actions=[
         Node(
             package='robot_localization',
             executable='ekf_node',
@@ -50,10 +54,16 @@ def generate_launch_description():
             parameters=[config_file,  {'use_sim_time': True}],
             remappings=[
                 ('/odometry/filtered', '/odometry/filtered/local')
+                    ]
+                )
             ]
         ),
         
         # Global EKF - fuses local odometry + GPS
+        # Delay startup by 4 seconds (after local EKF) to ensure local EKF is publishing
+        TimerAction(
+            period=4.0,
+            actions=[
         Node(
             package='robot_localization',
             executable='ekf_node',
@@ -62,6 +72,8 @@ def generate_launch_description():
             parameters=[config_file,  {'use_sim_time': True}],
             remappings=[
                 ('/odometry/filtered', '/odometry/filtered/global')
+                    ]
+                )
             ]
         ),
 

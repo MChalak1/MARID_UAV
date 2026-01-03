@@ -9,6 +9,8 @@ from nav_msgs.msg import Odometry
 import subprocess
 import os
 import re
+import math
+import time
 
 class GazeboPoseToOdom(Node):
     def __init__(self):
@@ -48,38 +50,59 @@ class GazeboPoseToOdom(Node):
     
     def query_pose_using_gz_model(self):
         """Query model pose using gz model command"""
-        try:
-            # Use gz model -p command to get pose
-            # Format: gz model -m marid -p
-            # Use shell=True to ensure proper environment and connection to Gazebo
-            # The command works manually but times out from Python, so use longer timeout
-            cmd_str = f'gz model -m {self.model_name_} -p'
-            result = subprocess.run(
-                cmd_str,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=3.0,  # Longer timeout
-                executable='/bin/bash'
-            )
-            
-            if result.returncode == 0 and result.stdout:
-                # Parse output format:
-                # Pose [ XYZ (m) ] [ RPY (rad) ]:
-                # [0.000000 0.000000 5.000000]
-                # [0.000000 -0.000000 0.000000]
-                parsed = self.parse_gz_model_output(result.stdout)
-                if parsed is None and result.stdout:
-                    # Log the actual output for debugging
-                    self.get_logger().warn(f'Failed to parse output. First 200 chars: {result.stdout[:200]}')
-                return parsed
-            else:
-                if result.returncode != 0:
-                    self.get_logger().debug(f'gz model command returned code {result.returncode}, stderr: {result.stderr[:100]}')
-        except subprocess.TimeoutExpired:
-            self.get_logger().warn('gz model command timed out')
-        except Exception as e:
-            self.get_logger().error(f'gz model command failed: {e}')
+        max_retries = 2
+        timeout = 5.0  # Increased from 3.0 to 5.0 seconds
+        
+        for attempt in range(max_retries):
+            try:
+                # Use gz model -p command to get pose
+                cmd_str = f'gz model -m {self.model_name_} -p'
+                result = subprocess.run(
+                    cmd_str,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    executable='/bin/bash'
+                )
+                
+                if result.returncode == 0 and result.stdout:
+                    # Parse output format:
+                    parsed = self.parse_gz_model_output(result.stdout)
+                    if parsed is not None:
+                        return parsed
+                    elif result.stdout:
+                        # Log the actual output for debugging (only on last attempt)
+                        if attempt == max_retries - 1:
+                            self.get_logger().warn(f'Failed to parse output. First 200 chars: {result.stdout[:200]}')
+                else:
+                    if result.returncode != 0:
+                        if attempt == max_retries - 1:  # Last attempt
+                            self.get_logger().debug(f'gz model command returned code {result.returncode}, stderr: {result.stderr[:100]}')
+                        # Check if model doesn't exist
+                        if 'No model named' in result.stderr or 'No model named' in result.stdout:
+                            if attempt == max_retries - 1:
+                                self.get_logger().warn(f'Model "{self.model_name_}" not found in Gazebo. Is it spawned?')
+                            return None
+                    # Retry on failure
+                    if attempt < max_retries - 1:
+                        time.sleep(0.5)
+                        continue
+                        
+            except subprocess.TimeoutExpired:
+                if attempt == max_retries - 1:  # Last attempt
+                    self.get_logger().warn(f'gz model command timed out after {max_retries} attempts (timeout: {timeout}s)')
+                    self.get_logger().warn('Is Gazebo running? Is the model spawned?')
+                else:
+                    timeout += 2.0  # Increase timeout for next attempt
+                    time.sleep(0.5)
+                    continue
+            except Exception as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    self.get_logger().error(f'gz model command failed: {e}')
+                else:
+                    time.sleep(0.5)
+                    continue
         
         return None
     
@@ -127,12 +150,27 @@ class GazeboPoseToOdom(Node):
                 pitch = float(rpy_values[1])
                 yaw = float(rpy_values[2])
                 
+                # Validate values are not NaN or infinite
+                if (math.isnan(x) or math.isnan(y) or math.isnan(z) or
+                    math.isnan(roll) or math.isnan(pitch) or math.isnan(yaw) or
+                    math.isinf(x) or math.isinf(y) or math.isinf(z) or
+                    math.isinf(roll) or math.isinf(pitch) or math.isinf(yaw)):
+                    self.get_logger().warn(f'Parsed NaN or infinite values from Gazebo pose: x={x}, y={y}, z={z}, roll={roll}, pitch={pitch}, yaw={yaw}')
+                    return None
+                
                 pose_msg.pose.pose.position.x = x
                 pose_msg.pose.pose.position.y = y
                 pose_msg.pose.pose.position.z = z
                 
                 # Convert Euler to quaternion
                 qx, qy, qz, qw = quaternion_from_euler(roll, pitch, yaw)
+                
+                # Validate quaternion is not NaN
+                if (math.isnan(qx) or math.isnan(qy) or math.isnan(qz) or math.isnan(qw) or
+                    math.isinf(qx) or math.isinf(qy) or math.isinf(qz) or math.isinf(qw)):
+                    self.get_logger().warn(f'Quaternion conversion produced NaN or infinite values: qx={qx}, qy={qy}, qz={qz}, qw={qw}')
+                    return None
+                
                 pose_msg.pose.pose.orientation.x = qx
                 pose_msg.pose.pose.orientation.y = qy
                 pose_msg.pose.pose.orientation.z = qz
@@ -167,9 +205,24 @@ class GazeboPoseToOdom(Node):
                 self.get_logger().warn('Still unable to query pose from Gazebo. Is Gazebo running?')
             return
         
+        # Validate pose values are not NaN before publishing
+        pos = pose_msg.pose.pose.position
+        ori = pose_msg.pose.pose.orientation
+        
+        if (math.isnan(pos.x) or math.isnan(pos.y) or math.isnan(pos.z) or
+            math.isnan(ori.x) or math.isnan(ori.y) or math.isnan(ori.z) or math.isnan(ori.w) or
+            math.isinf(pos.x) or math.isinf(pos.y) or math.isinf(pos.z) or
+            math.isinf(ori.x) or math.isinf(ori.y) or math.isinf(ori.z) or math.isinf(ori.w)):
+            if not hasattr(self, '_nan_warn_count'):
+                self._nan_warn_count = 0
+            self._nan_warn_count += 1
+            if self._nan_warn_count % 250 == 0:  # Every 5 seconds at 50Hz
+                self.get_logger().warn('Received NaN or infinite values from Gazebo pose query, skipping publication')
+            return
+        
         if not self.pose_received_:
             self.get_logger().info('✓ Successfully querying pose from Gazebo using gz model!')
-            self.get_logger().info(f'  Position: x={pose_msg.pose.pose.position.x:.3f}, y={pose_msg.pose.pose.position.y:.3f}, z={pose_msg.pose.pose.position.z:.3f}')
+            self.get_logger().info(f'  Position: x={pos.x:.3f}, y={pos.y:.3f}, z={pos.z:.3f}')
             self.pose_received_ = True
         
         try:

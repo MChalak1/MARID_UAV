@@ -47,12 +47,13 @@
             <link_name>left_wing</link_name>
             <air_density>1.225</air_density>
             <area>0.20674668328</area>  <!-- Increased for testing -->
+            <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
             <cla>2.0</cla>    <!-- Increased lift -->
             <cda>0.5</cda>     <!-- Increased drag -->
             <alpha_stall>0.35</alpha_stall>
             <forward>0 1 0</forward>
             <up>0 0 1</up>
-            <cp>0 0 0.05</cp>  <!-- Offset for torque -->
+            <cp>0 0 0</cp>  <!-- Removed offset to prevent unwanted rotation -->
             <debug>true</debug>  <!-- ADD DEBUG OUTPUT -->
             <visualize>true</visualize>  <!-- VISUAL FORCES -->
         </plugin>
@@ -63,12 +64,13 @@
             <link_name>right_wing</link_name>
             <air_density>1.225</air_density>
             <area>0.20674668328</area>
+            <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
             <cla>2.0</cla>
             <cda>0.5</cda>
             <alpha_stall>0.35</alpha_stall>
             <forward>0 1 0</forward>
             <up>0 0 1</up>
-            <cp>0 0 0.05</cp>
+            <cp>0 0 0</cp>  <!-- Removed offset to prevent unwanted rotation -->
             <debug>true</debug>
             <visualize>true</visualize>
         </plugin>
@@ -80,12 +82,13 @@
             <link_name>tail_left</link_name>
             <air_density>1.225</air_density>
             <area>0.05733020792</area>  <!-- Increased for testing -->
+            <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
             <cla>2.0</cla>    <!-- Increased lift -->
             <cda>0.5</cda>     <!-- Increased drag -->
             <alpha_stall>0.35</alpha_stall>
             <forward>0 1 0</forward>
             <up>0 0 1</up>
-            <cp>0 0 0.05</cp>  <!-- Offset for torque -->
+            <cp>0 0 0</cp>  <!-- Removed offset to prevent unwanted rotation -->
             <debug>true</debug>  <!-- ADD DEBUG OUTPUT -->
             <visualize>true</visualize>  <!-- VISUAL FORCES -->
         </plugin>
@@ -96,12 +99,13 @@
             <link_name>tail_right</link_name>
             <air_density>1.225</air_density>
             <area>0.05733020792</area>
+            <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
             <cla>2.0</cla>
             <cda>0.5</cda>
             <alpha_stall>0.35</alpha_stall>
             <forward>0 1 0</forward>
             <up>0 0 1</up>
-            <cp>0 0 0.05</cp>
+            <cp>0 0 0</cp>  <!-- Removed offset to prevent unwanted rotation -->
             <debug>true</debug>
             <visualize>true</visualize>
         </plugin>
@@ -114,11 +118,13 @@
             <link_name>base_link_front</link_name>
             <air_density>1.225</air_density>
             <area>1.1425454568</area>
+            <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
             <cla>0.0</cla>
             <cda>0.2</cda>  <!-- Increased drag -->
             <alpha_stall>1.57</alpha_stall>
             <forward>0 1 0</forward>
             <up>0 0 1</up>
+            <cp>0 0 0</cp>  <!-- No offset for fuselage -->
             <debug>true</debug>
         </plugin>
     </gazebo>
@@ -128,11 +134,13 @@
             <link_name>main_tail</link_name>
             <air_density>1.225</air_density>
             <area>0.1447926136</area>
+            <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
             <cla>0.0</cla>
             <cda>0.15</cda>  <!-- Increased drag -->
             <alpha_stall>1.57</alpha_stall>
             <forward>0 1 0</forward>
             <up>0 0 1</up>
+            <cp>0 0 0</cp>  <!-- No offset for tail -->
             <debug>true</debug>
         </plugin>
     </gazebo>

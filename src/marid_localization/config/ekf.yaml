@@ -2,7 +2,7 @@
 ekf_filter_node_odom:
   ros__parameters:
     frequency: 50.0
-    sensor_timeout: 1.0  # Increased timeout to allow sensors to initialize
+    sensor_timeout: 2.0  # Increased timeout to allow sensors to initialize and stabilize
     two_d_mode: false  # 3D for fixed-wing
     
     # Frame configuration
@@ -97,7 +97,7 @@ ekf_filter_node_odom:
 ekf_filter_node_map:
   ros__parameters:
     frequency: 30.0
-    sensor_timeout: 1.0  # Increased timeout to allow sensors to initialize
+    sensor_timeout: 2.0  # Increased timeout to allow sensors to initialize and stabilize
     two_d_mode: false
     
     # Frame configuration
