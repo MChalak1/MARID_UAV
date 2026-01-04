@@ -23,7 +23,7 @@ def imuCallback(imu):
         math.isinf(imu.angular_velocity.z) or
         math.isinf(imu.linear_acceleration.x) or math.isinf(imu.linear_acceleration.y) or
         math.isinf(imu.linear_acceleration.z)):
-        # Don't publish invalid IMU data - log occasionally
+        # Not to publish invalid IMU data - log occasionally
         if not hasattr(imuCallback, '_nan_warn_count'):
             imuCallback._nan_warn_count = 0
         imuCallback._nan_warn_count += 1
@@ -43,6 +43,7 @@ def main(args=None):
     time.sleep(1)
     imu_pub = node.create_publisher(Imu, "/imu_ekf", 10)
     imu_sub = node.create_subscription(Imu, "/imu", imuCallback, 10)
+    
     # Store node reference for logging in callback
     imuCallback._node = node
     rclpy.spin(node)

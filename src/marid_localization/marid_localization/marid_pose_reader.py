@@ -11,7 +11,7 @@ class MaridPoseReader(Node):
         # Subscribe to your global EKF output
         self.odom_sub = self.create_subscription(
             Odometry, 
-            "/odometry/global",  # or "/odometry/local" depending on which you want
+            "/odometry/global",  
             self.odom_callback, 
             10
         )
