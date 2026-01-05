@@ -33,9 +33,18 @@ class MaridAIController(Node):
         self.declare_parameter('enable_ai', True)
         self.declare_parameter('enable_pid_fallback', True)
         
-        # Waypoint navigation parameters
-        self.declare_parameter('destination_x', 0.0)  # Target destination X (m)
-        self.declare_parameter('destination_y', 0.0)  # Target destination Y (m)
+        # Waypoint navigation parameters - GPS coordinates (preferred)
+        self.declare_parameter('destination_latitude', None)  # Target destination lat (degrees)
+        self.declare_parameter('destination_longitude', None)  # Target destination lon (degrees)
+        # Local coordinates (backward compatibility)
+        self.declare_parameter('destination_x', None)  # Target destination X (m) - optional
+        self.declare_parameter('destination_y', None)  # Target destination Y (m) - optional
+        
+        # Datum (reference point) - should match navsat_transform.yaml
+        self.declare_parameter('datum_latitude', 37.45397139527321)  # Reference latitude (degrees)
+        self.declare_parameter('datum_longitude', -122.16791304213365)  # Reference longitude (degrees)
+        
+        # Altitude and velocity parameters
         self.declare_parameter('altitude_min', 3.0)  # Minimum altitude (m)
         self.declare_parameter('altitude_max', 10.0)  # Maximum altitude (m)
         self.declare_parameter('target_altitude', 5.0)  # Preferred altitude (m)
@@ -55,11 +64,38 @@ class MaridAIController(Node):
         self.enable_ai_ = self.get_parameter('enable_ai').value
         self.enable_pid_fallback_ = self.get_parameter('enable_pid_fallback').value
         
-        # Waypoint parameters
-        self.destination_ = np.array([
-            self.get_parameter('destination_x').value,
-            self.get_parameter('destination_y').value
-        ])
+        # Get datum coordinates
+        self.datum_lat_ = self.get_parameter('datum_latitude').value
+        self.datum_lon_ = self.get_parameter('datum_longitude').value
+        
+        # Get waypoint - prefer lat/lon, fall back to x/y
+        dest_lat = self.get_parameter('destination_latitude').value
+        dest_lon = self.get_parameter('destination_longitude').value
+        dest_x = self.get_parameter('destination_x').value
+        dest_y = self.get_parameter('destination_y').value
+        
+        # Determine destination coordinates
+        if dest_lat is not None and dest_lon is not None:
+            # Use GPS coordinates (preferred)
+            x, y = self.lat_lon_to_local(dest_lat, dest_lon, self.datum_lat_, self.datum_lon_)
+            self.destination_ = np.array([x, y])
+            self.destination_gps_ = (dest_lat, dest_lon)
+            self.use_gps_coords_ = True
+            self.get_logger().info(f'Using GPS coordinates: ({dest_lat:.6f}°, {dest_lon:.6f}°)')
+            self.get_logger().info(f'Converted to local: ({x:.2f}, {y:.2f}) m')
+        elif dest_x is not None and dest_y is not None:
+            # Use local coordinates (backward compatibility)
+            self.destination_ = np.array([dest_x, dest_y])
+            self.destination_gps_ = None
+            self.use_gps_coords_ = False
+            self.get_logger().info(f'Using local coordinates: ({dest_x:.2f}, {dest_y:.2f}) m')
+        else:
+            # Default to origin if nothing specified
+            self.destination_ = np.array([0.0, 0.0])
+            self.destination_gps_ = None
+            self.use_gps_coords_ = False
+            self.get_logger().warn('No destination specified, defaulting to origin (0, 0)')
+        
         self.altitude_min_ = self.get_parameter('altitude_min').value
         self.altitude_max_ = self.get_parameter('altitude_max').value
         self.target_altitude_ = self.get_parameter('target_altitude').value
@@ -159,10 +195,85 @@ class MaridAIController(Node):
         
         self.get_logger().info(f'MARID AI Controller initialized')
         self.get_logger().info(f'Control mode: {self.control_mode_}')
-        self.get_logger().info(f'Destination: ({self.destination_[0]:.2f}, {self.destination_[1]:.2f})')
+        if self.use_gps_coords_ and self.destination_gps_ is not None:
+            self.get_logger().info(f'Destination (GPS): ({self.destination_gps_[0]:.6f}°, {self.destination_gps_[1]:.6f}°)')
+        self.get_logger().info(f'Destination (local): ({self.destination_[0]:.2f}, {self.destination_[1]:.2f}) m')
+        self.get_logger().info(f'Datum: ({self.datum_lat_:.6f}°, {self.datum_lon_:.6f}°)')
         self.get_logger().info(f'Altitude range: {self.altitude_min_:.2f} - {self.altitude_max_:.2f} m')
         self.get_logger().info(f'Target altitude: {self.target_altitude_:.2f} m')
         self.get_logger().info(f'Target velocity: {self.target_velocity_:.2f} m/s')
+    
+    def lat_lon_to_local(self, lat, lon, datum_lat, datum_lon):
+        """
+        Convert latitude/longitude to local x/y coordinates (meters) relative to datum.
+        Uses simple flat-earth approximation (accurate for small areas < 100km).
+        
+        Args:
+            lat: Target latitude (degrees)
+            lon: Target longitude (degrees)
+            datum_lat: Reference latitude (degrees) - from navsat_transform.yaml
+            datum_lon: Reference longitude (degrees) - from navsat_transform.yaml
+        
+        Returns:
+            (x, y) tuple in meters relative to datum
+            x is East (positive = east of datum)
+            y is North (positive = north of datum)
+        """
+        # Earth radius in meters
+        R = 6371000.0
+        
+        # Convert to radians
+        lat_rad = math.radians(lat)
+        lon_rad = math.radians(lon)
+        datum_lat_rad = math.radians(datum_lat)
+        datum_lon_rad = math.radians(datum_lon)
+        
+        # Calculate differences
+        dlat = lat_rad - datum_lat_rad
+        dlon = lon_rad - datum_lon_rad
+        
+        # Flat-earth approximation (accurate for small distances < 100km)
+        # x is East (longitude difference)
+        x = R * dlon * math.cos(datum_lat_rad)
+        # y is North (latitude difference)
+        y = R * dlat
+        
+        return x, y
+    
+    def local_to_lat_lon(self, x, y, datum_lat, datum_lon):
+        """
+        Convert local x/y coordinates to latitude/longitude.
+        Inverse of lat_lon_to_local().
+        
+        Args:
+            x: East offset in meters (positive = east)
+            y: North offset in meters (positive = north)
+            datum_lat: Reference latitude (degrees)
+            datum_lon: Reference longitude (degrees)
+        
+        Returns:
+            (lat, lon) tuple in degrees
+        """
+        # Earth radius in meters
+        R = 6371000.0
+        
+        # Convert datum to radians
+        datum_lat_rad = math.radians(datum_lat)
+        datum_lon_rad = math.radians(datum_lon)
+        
+        # Convert local coordinates to lat/lon differences
+        dlat = y / R  # North component
+        dlon = x / (R * math.cos(datum_lat_rad))  # East component
+        
+        # Add to datum
+        lat_rad = datum_lat_rad + dlat
+        lon_rad = datum_lon_rad + dlon
+        
+        # Convert back to degrees
+        lat = math.degrees(lat_rad)
+        lon = math.degrees(lon_rad)
+        
+        return lat, lon
     
     def odom_callback(self, msg):
         """Store current odometry"""
@@ -177,12 +288,33 @@ class MaridAIController(Node):
         self.current_altitude_ = msg.pose.pose.position.z
     
     def waypoint_callback(self, msg):
-        """Update destination waypoint dynamically"""
+        """
+        Update destination waypoint dynamically.
+        Supports both local coordinates (x, y) and GPS coordinates via custom fields.
+        For GPS coordinates, use frame_id to indicate GPS mode, or extend with custom message.
+        """
+        # For now, assume PoseStamped uses x/y in local frame
+        # You could extend this to check frame_id or use a custom message type
         self.destination_ = np.array([msg.pose.position.x, msg.pose.position.y])
+        
+        # If waypoint is provided in local coordinates, convert to GPS for logging if datum is available
+        if self.datum_lat_ is not None and self.datum_lon_ is not None:
+            lat, lon = self.local_to_lat_lon(
+                msg.pose.position.x, 
+                msg.pose.position.y,
+                self.datum_lat_,
+                self.datum_lon_
+            )
+            self.destination_gps_ = (lat, lon)
+            self.use_gps_coords_ = False  # Waypoint came in local coords
+            self.get_logger().info(f'New waypoint set (local): ({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f}) m')
+            self.get_logger().info(f'Waypoint GPS equivalent: ({lat:.6f}°, {lon:.6f}°)')
+        else:
+            self.get_logger().info(f'New waypoint set: ({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f}) m')
+        
         if msg.pose.position.z > 0:
             self.target_altitude_ = msg.pose.position.z
         self.waypoint_reached_ = False
-        self.get_logger().info(f'New waypoint set: ({self.destination_[0]:.2f}, {self.destination_[1]:.2f}) at {self.target_altitude_:.2f} m')
     
     def get_state_vector(self):
         """

@@ -18,9 +18,17 @@ def generate_launch_description():
                 'update_rate': 50.0,
                 'enable_ai': True,
                 'enable_pid_fallback': True,
-                # Waypoint navigation
-                'destination_x': 100.0,  # Target X (m)
-                'destination_y': 100.0,  # Target Y (m)
+                # Waypoint navigation - GPS coordinates (preferred)
+                # Use either GPS coordinates OR local x/y, not both
+                'destination_latitude': None,  # Target latitude (degrees) - set this for GPS navigation
+                'destination_longitude': None,  # Target longitude (degrees) - set this for GPS navigation
+                # OR use local coordinates (backward compatibility)
+                'destination_x': 100.0,  # Target X (m) - only if lat/lon not set
+                'destination_y': 100.0,  # Target Y (m) - only if lat/lon not set
+                # Datum (reference point) - must match navsat_transform.yaml
+                'datum_latitude': 37.45397139527321,  # Reference latitude (degrees)
+                'datum_longitude': -122.16791304213365,  # Reference longitude (degrees)
+                # Altitude and velocity
                 'altitude_min': 3.0,  # Minimum altitude (m)
                 'altitude_max': 10.0,  # Maximum altitude (m)
                 'target_altitude': 5.0,  # Preferred altitude (m)
