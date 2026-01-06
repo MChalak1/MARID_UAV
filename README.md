@@ -38,7 +38,7 @@ source install/setup.bash
 # Launch simulation
 ros2 launch marid_gazebo gazebo.launch.py
 
-📖 Documentation
+📖 Documentation (To Be Published Later)
 
 UAV architecture diagrams
 
