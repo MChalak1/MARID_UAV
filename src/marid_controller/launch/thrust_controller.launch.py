@@ -14,7 +14,7 @@ def generate_launch_description():
             name="marid_thrust_controller",
             output='screen',
             parameters=[{
-                'initial_thrust': 1.0,         # Initial thrust: 1N
+                'initial_thrust': 0.0,         # Initial thrust: 0N (AI controller will set thrust)
                 'min_thrust': 0.0,             # Minimum thrust: 0N
                 'max_thrust': 30.0,            # Maximum thrust: 30N
                 'thrust_increment': 1.0,       # Increment per keypress: 1N

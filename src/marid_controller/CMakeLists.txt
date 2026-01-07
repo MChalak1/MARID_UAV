@@ -31,6 +31,7 @@ install(PROGRAMS
   marid_controller/marid_thrust_controller.py
   marid_controller/marid_ai_controller.py
   marid_controller/marid_safety_node.py
+  marid_controller/marid_attitude_controller.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

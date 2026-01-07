@@ -30,16 +30,8 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}]
     )
 
-    marid_odom_spawner = Node(
-        package="marid_controller",
-        executable="marid_odom_pub.py",      
-        name="marid_odom_node",
-        output='screen',
-        parameters=[{'use_sim_time': True}]
-    )
-
     return LaunchDescription([
         joint_state_broadcaster_spawner,
         simple_position_controller,
-        marid_odom_spawner,
+        # marid_odom_pub removed - redundant with EKF sources (/gazebo/odom, /imu_ekf, /barometer/altitude)
     ])

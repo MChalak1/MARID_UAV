@@ -12,6 +12,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped
 import numpy as np
 import math
 import time
+import xml.etree.ElementTree as ET
 
 # Import your AI model
 try:
@@ -20,6 +21,41 @@ try:
 except ImportError:
     AI_MODEL_AVAILABLE = False
     print("Warning: AI model not available. Install PyTorch/TensorFlow and train a model.")
+
+
+def calculate_total_mass_from_urdf(urdf_string):
+    """
+    Parse URDF/XACRO string and calculate total mass of all links.
+    Returns total mass in kg, or None if parsing fails.
+    """
+    try:
+        root = ET.fromstring(urdf_string)
+        
+        total_mass = 0.0
+        mass_count = 0
+        
+        # Find all links with inertial properties
+        for link in root.findall('.//link'):
+            inertial = link.find('inertial')
+            if inertial is not None:
+                mass_elem = inertial.find('mass')
+                if mass_elem is not None:
+                    mass_value = mass_elem.get('value')
+                    if mass_value:
+                        try:
+                            mass = float(mass_value)
+                            total_mass += mass
+                            mass_count += 1
+                        except ValueError:
+                            pass
+        
+        if mass_count > 0:
+            return total_mass
+        else:
+            return None
+    except Exception as e:
+        print(f"Error parsing URDF: {e}")
+        return None
 
 
 class MaridAIController(Node):
@@ -46,15 +82,17 @@ class MaridAIController(Node):
         
         # Altitude and velocity parameters
         self.declare_parameter('altitude_min', 3.0)  # Minimum altitude (m)
-        self.declare_parameter('altitude_max', 10.0)  # Maximum altitude (m)
-        self.declare_parameter('target_altitude', 5.0)  # Preferred altitude (m)
-        self.declare_parameter('target_velocity', 10.0)  # Average/target speed (m/s)
+        self.declare_parameter('altitude_max', 10000.0)  # Maximum altitude (m)
+        self.declare_parameter('target_altitude', 8000.0)  # Preferred altitude (m)
+        self.declare_parameter('target_velocity', 112.0)  # Average/target speed (m/s)
         self.declare_parameter('waypoint_tolerance', 2.0)  # Distance tolerance for waypoint (m)
         self.declare_parameter('altitude_tolerance', 1.0)  # Altitude tolerance (m)
         
-        # Control limits
+        # Control limits - AUTO-CALCULATION SUPPORT
         self.declare_parameter('min_thrust', 0.0)
-        self.declare_parameter('max_thrust', 30.0)
+        self.declare_parameter('max_thrust', None)  # None = auto-calculate from mass
+        self.declare_parameter('thrust_to_weight_ratio', 2.5)  # Thrust-to-weight ratio (e.g., 2.5 = 2.5x weight)
+        self.declare_parameter('base_thrust_override', None)  # Override auto-calculation if set (N)
         self.declare_parameter('max_yaw_differential', 0.2)
         
         # Get parameters
@@ -103,8 +141,40 @@ class MaridAIController(Node):
         self.waypoint_tolerance_ = self.get_parameter('waypoint_tolerance').value
         self.altitude_tolerance_ = self.get_parameter('altitude_tolerance').value
         
+        # Calculate thrust limits based on aircraft mass
+        self.aircraft_mass_ = None
         self.min_thrust_ = self.get_parameter('min_thrust').value
-        self.max_thrust_ = self.get_parameter('max_thrust').value
+        max_thrust_param = self.get_parameter('max_thrust').value
+        base_thrust_override = self.get_parameter('base_thrust_override').value
+        thrust_to_weight_ratio = self.get_parameter('thrust_to_weight_ratio').value
+        
+        # Try to get aircraft mass and calculate max_thrust
+        if max_thrust_param is None or base_thrust_override is not None:
+            # Auto-calculate from mass
+            self.aircraft_mass_ = self.get_aircraft_mass()
+            
+            if self.aircraft_mass_ is not None:
+                if base_thrust_override is not None:
+                    # Use override value directly
+                    self.max_thrust_ = float(base_thrust_override)
+                    self.get_logger().info(f'Aircraft mass: {self.aircraft_mass_:.2f} kg, Using override thrust: {self.max_thrust_:.2f} N')
+                else:
+                    # Calculate based on thrust-to-weight ratio
+                    g = 9.81  # m/s²
+                    weight = self.aircraft_mass_ * g  # Weight in Newtons
+                    self.max_thrust_ = weight * thrust_to_weight_ratio
+                    self.get_logger().info(f'Aircraft mass: {self.aircraft_mass_:.2f} kg')
+                    self.get_logger().info(f'Weight: {weight:.2f} N')
+                    self.get_logger().info(f'Calculated max_thrust: {self.max_thrust_:.2f} N (T/W ratio: {thrust_to_weight_ratio:.2f})')
+            else:
+                # Fallback to default if mass calculation fails
+                self.max_thrust_ = 200.0 if max_thrust_param is None else float(max_thrust_param)
+                self.get_logger().warn(f'Could not determine aircraft mass, using default max_thrust: {self.max_thrust_:.2f} N')
+        else:
+            # Use explicitly provided max_thrust
+            self.max_thrust_ = float(max_thrust_param)
+            self.get_logger().info(f'Using explicit max_thrust: {self.max_thrust_:.2f} N')
+        
         self.max_yaw_differential_ = self.get_parameter('max_yaw_differential').value
         
         # State variables
@@ -113,9 +183,9 @@ class MaridAIController(Node):
         self.current_altitude_ = None
         self.waypoint_reached_ = False
         
-        # PID controllers
-        self.altitude_pid_ = PIDController(kp=2.0, ki=0.1, kd=0.5, output_limits=(0.0, 30.0))
-        self.velocity_pid_ = PIDController(kp=1.0, ki=0.05, kd=0.3, output_limits=(0.0, 30.0))
+        # PID controllers - update output limits to match max_thrust
+        self.altitude_pid_ = PIDController(kp=2.0, ki=0.1, kd=0.5, output_limits=(0.0, self.max_thrust_))
+        self.velocity_pid_ = PIDController(kp=1.0, ki=0.05, kd=0.3, output_limits=(0.0, self.max_thrust_))
         self.pitch_pid_ = PIDController(kp=1.5, ki=0.1, kd=0.4, output_limits=(-0.2, 0.2))
         self.yaw_pid_ = PIDController(kp=0.5, ki=0.05, kd=0.1, output_limits=(-0.2, 0.2))
         self.heading_pid_ = PIDController(kp=1.0, ki=0.1, kd=0.3, output_limits=(-0.2, 0.2))
@@ -202,6 +272,67 @@ class MaridAIController(Node):
         self.get_logger().info(f'Altitude range: {self.altitude_min_:.2f} - {self.altitude_max_:.2f} m')
         self.get_logger().info(f'Target altitude: {self.target_altitude_:.2f} m')
         self.get_logger().info(f'Target velocity: {self.target_velocity_:.2f} m/s')
+        self.get_logger().info(f'Thrust range: {self.min_thrust_:.2f} - {self.max_thrust_:.2f} N')
+    
+    def get_aircraft_mass(self):
+        """
+        Get total aircraft mass from URDF file.
+        Reads the URDF/XACRO file directly and calculates total mass.
+        Returns mass in kg, or None if unavailable.
+        """
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            import os
+            import subprocess
+            
+            marid_description_dir = get_package_share_directory('marid_description')
+            urdf_path = os.path.join(marid_description_dir, 'urdf', 'marid.urdf.xacro')
+            
+            if not os.path.exists(urdf_path):
+                self.get_logger().warn(f'URDF file not found: {urdf_path}')
+                return None
+            
+            # Process XACRO file to get expanded URDF
+            # xacro command expands all includes and macros
+            try:
+                result = subprocess.run(
+                    ['xacro', urdf_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=5.0
+                )
+                
+                if result.returncode == 0 and result.stdout:
+                    expanded_urdf = result.stdout
+                    mass = calculate_total_mass_from_urdf(expanded_urdf)
+                    if mass is not None and mass > 0:
+                        return mass
+                    else:
+                        self.get_logger().warn(f'Could not parse mass from URDF (got {mass})')
+                else:
+                    self.get_logger().warn(f'xacro command failed: {result.stderr}')
+            except FileNotFoundError:
+                self.get_logger().warn('xacro command not found. Install with: sudo apt install ros-jazzy-xacro')
+            except subprocess.TimeoutExpired:
+                self.get_logger().warn('xacro command timed out')
+            except Exception as e:
+                self.get_logger().warn(f'Error running xacro: {e}')
+            
+            # Fallback: Try to parse XACRO directly (may not work with includes)
+            try:
+                with open(urdf_path, 'r') as f:
+                    urdf_content = f.read()
+                mass = calculate_total_mass_from_urdf(urdf_content)
+                if mass is not None and mass > 0:
+                    self.get_logger().info('Parsed mass from XACRO file directly (may be incomplete)')
+                    return mass
+            except Exception as e:
+                self.get_logger().debug(f'Could not parse XACRO directly: {e}')
+            
+            return None
+        except Exception as e:
+            self.get_logger().warn(f'Could not get aircraft mass: {e}')
+            return None
     
     def lat_lon_to_local(self, lat, lon, datum_lat, datum_lon):
         """

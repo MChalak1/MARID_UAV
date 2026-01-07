@@ -27,6 +27,7 @@ install(PROGRAMS
   marid_localization/imu_republisher.py
   marid_localization/marid_pose_reader.py
   marid_localization/gazebo_pose_to_odom.py
+  marid_localization/air_density_calculator.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

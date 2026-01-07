@@ -113,4 +113,20 @@ def generate_launch_description():
                 'use_sim_time': True,
             }]
         ),
+        
+        # Air density calculator - calculates density based on altitude
+        Node(
+            package='marid_localization',
+            executable='air_density_calculator.py',
+            name='air_density_calculator',
+            output='screen',
+            parameters=[{
+                'update_rate': 10.0,  # Hz
+                'use_barometer': True,  # Use barometer altitude if available
+                'sea_level_density': 1.225,  # kg/m³
+                'sea_level_pressure': 101325.0,  # Pa
+                'sea_level_temperature': 288.15,  # K (15°C)
+                'use_sim_time': True,
+            }]
+        ),
     ])

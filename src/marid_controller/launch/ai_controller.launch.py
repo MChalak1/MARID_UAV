@@ -18,16 +18,15 @@ def generate_launch_description():
                 'update_rate': 50.0,
                 'enable_ai': True,
                 'enable_pid_fallback': True,
-                # Waypoint navigation - GPS coordinates (preferred)
-                # Use either GPS coordinates OR local x/y, not both
-                'destination_latitude': None,  # Target latitude (degrees) - set this for GPS navigation
-                'destination_longitude': None,  # Target longitude (degrees) - set this for GPS navigation
-                # OR use local coordinates (backward compatibility)
-                'destination_x': 100.0,  # Target X (m) - only if lat/lon not set
-                'destination_y': 100.0,  # Target Y (m) - only if lat/lon not set
+                # Waypoint navigation - GPS coordinates (default: Los Angeles, CA)
+                'destination_latitude': 34.0522,  # Los Angeles, CA (degrees)
+                'destination_longitude': -118.2437,  # Los Angeles, CA (degrees)
+                # Local coordinates (backward compatibility - only used if GPS not set)
+                # 'destination_x': 100.0,  # Target X (m) - only if lat/lon not set
+                # 'destination_y': 100.0,  # Target Y (m) - only if lat/lon not set
                 # Datum (reference point) - must match navsat_transform.yaml
-                'datum_latitude': 37.45397139527321,  # Reference latitude (degrees)
-                'datum_longitude': -122.16791304213365,  # Reference longitude (degrees)
+                'datum_latitude': 37.45397139527321,  # Reference latitude (degrees) - SF Bay Area
+                'datum_longitude': -122.16791304213365,  # Reference longitude (degrees) - SF Bay Area
                 # Altitude and velocity
                 'altitude_min': 3.0,  # Minimum altitude (m)
                 'altitude_max': 10.0,  # Maximum altitude (m)
@@ -35,9 +34,13 @@ def generate_launch_description():
                 'target_velocity': 10.0,  # Average speed (m/s)
                 'waypoint_tolerance': 2.0,  # Waypoint reach tolerance (m)
                 'altitude_tolerance': 1.0,  # Altitude tolerance (m)
-                # Control limits
+                # Control limits - AUTO-CALCULATION MODE
                 'min_thrust': 0.0,
-                'max_thrust': 30.0,
+                # Note: Omit max_thrust to auto-calculate from aircraft mass
+                # 'max_thrust': 200.0,  # Uncomment to set fixed max thrust (N)
+                'thrust_to_weight_ratio': 2.5,  # Thrust-to-weight ratio (2.5x weight for high-speed flight)
+                # Alternative: Override auto-calculation with fixed value
+                # 'base_thrust_override': 200.0,  # Uncomment to use fixed thrust instead
                 'max_yaw_differential': 0.2,
                 'use_sim_time': True,
             }]

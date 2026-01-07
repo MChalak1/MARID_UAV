@@ -14,6 +14,42 @@ import sys
 import subprocess
 import os
 import time
+import xml.etree.ElementTree as ET
+
+
+def calculate_total_mass_from_urdf(urdf_string):
+    """
+    Parse URDF/XACRO string and calculate total mass of all links.
+    Returns total mass in kg, or None if parsing fails.
+    """
+    try:
+        root = ET.fromstring(urdf_string)
+        
+        total_mass = 0.0
+        mass_count = 0
+        
+        # Find all links with inertial properties
+        for link in root.findall('.//link'):
+            inertial = link.find('inertial')
+            if inertial is not None:
+                mass_elem = inertial.find('mass')
+                if mass_elem is not None:
+                    mass_value = mass_elem.get('value')
+                    if mass_value:
+                        try:
+                            mass = float(mass_value)
+                            total_mass += mass
+                            mass_count += 1
+                        except ValueError:
+                            pass
+        
+        if mass_count > 0:
+            return total_mass
+        else:
+            return None
+    except Exception as e:
+        print(f"Error parsing URDF: {e}")
+        return None
 
 # Try to import pynput for keyboard control
 try:
@@ -31,7 +67,9 @@ class MaridThrustController(Node):
         # Parameters
         self.declare_parameter('initial_thrust', 1.0)        # Initial thrust in Newtons
         self.declare_parameter('min_thrust', 0.0)             # Minimum thrust (N)
-        self.declare_parameter('max_thrust', 30.0)           # Maximum thrust (N)
+        self.declare_parameter('max_thrust', 200.0)          # Maximum thrust (N) - can be None for auto-calculation
+        self.declare_parameter('thrust_to_weight_ratio', 2.5)  # Thrust-to-weight ratio (if max_thrust is None)
+        self.declare_parameter('base_thrust_override', None)  # Override auto-calculation if set (N)
         self.declare_parameter('thrust_increment', 1.0)       # Thrust increment per keypress (N)
         self.declare_parameter('world_name', 'wt')            # Gazebo world name
         self.declare_parameter('model_name', 'marid')         # Model name
@@ -42,7 +80,30 @@ class MaridThrustController(Node):
         
         self.initial_thrust_ = self.get_parameter('initial_thrust').value
         self.min_thrust_ = self.get_parameter('min_thrust').value
-        self.max_thrust_ = self.get_parameter('max_thrust').value
+        
+        # Calculate max_thrust if needed (same logic as AI controller)
+        max_thrust_param = self.get_parameter('max_thrust').value
+        base_thrust_override = self.get_parameter('base_thrust_override').value
+        thrust_to_weight_ratio = self.get_parameter('thrust_to_weight_ratio').value
+        
+        if max_thrust_param is None or base_thrust_override is not None:
+            # Auto-calculate from mass
+            aircraft_mass = self.get_aircraft_mass()
+            if aircraft_mass is not None:
+                if base_thrust_override is not None:
+                    self.max_thrust_ = float(base_thrust_override)
+                    self.get_logger().info(f'Thrust Controller: Aircraft mass: {aircraft_mass:.2f} kg, Using override thrust: {self.max_thrust_:.2f} N')
+                else:
+                    g = 9.81
+                    weight = aircraft_mass * g
+                    self.max_thrust_ = weight * thrust_to_weight_ratio
+                    self.get_logger().info(f'Thrust Controller: Aircraft mass: {aircraft_mass:.2f} kg, Calculated max_thrust: {self.max_thrust_:.2f} N')
+            else:
+                self.max_thrust_ = 200.0 if max_thrust_param is None else float(max_thrust_param)
+                self.get_logger().warn(f'Thrust Controller: Could not determine mass, using default max_thrust: {self.max_thrust_:.2f} N')
+        else:
+            self.max_thrust_ = float(max_thrust_param)
+        
         self.thrust_increment_ = self.get_parameter('thrust_increment').value
         self.world_name_ = self.get_parameter('world_name').value
         self.model_name_ = self.get_parameter('model_name').value
@@ -195,6 +256,65 @@ class MaridThrustController(Node):
                 self.get_logger().info(f'Thrust decreased to {self.current_thrust_:.2f} N')
                 # Immediately apply the new thrust
                 self.apply_thrust()
+    
+    def get_aircraft_mass(self):
+        """
+        Get total aircraft mass from URDF file.
+        Reads the URDF/XACRO file directly and calculates total mass.
+        Returns mass in kg, or None if unavailable.
+        """
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            import os
+            import subprocess
+            
+            marid_description_dir = get_package_share_directory('marid_description')
+            urdf_path = os.path.join(marid_description_dir, 'urdf', 'marid.urdf.xacro')
+            
+            if not os.path.exists(urdf_path):
+                self.get_logger().warn(f'URDF file not found: {urdf_path}')
+                return None
+            
+            # Process XACRO file to get expanded URDF
+            try:
+                result = subprocess.run(
+                    ['xacro', urdf_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=5.0
+                )
+                
+                if result.returncode == 0 and result.stdout:
+                    expanded_urdf = result.stdout
+                    mass = calculate_total_mass_from_urdf(expanded_urdf)
+                    if mass is not None and mass > 0:
+                        return mass
+                    else:
+                        self.get_logger().warn(f'Could not parse mass from URDF (got {mass})')
+                else:
+                    self.get_logger().warn(f'xacro command failed: {result.stderr}')
+            except FileNotFoundError:
+                self.get_logger().warn('xacro command not found. Install with: sudo apt install ros-jazzy-xacro')
+            except subprocess.TimeoutExpired:
+                self.get_logger().warn('xacro command timed out')
+            except Exception as e:
+                self.get_logger().warn(f'Error running xacro: {e}')
+            
+            # Fallback: Try to parse XACRO directly (may not work with includes)
+            try:
+                with open(urdf_path, 'r') as f:
+                    urdf_content = f.read()
+                mass = calculate_total_mass_from_urdf(urdf_content)
+                if mass is not None and mass > 0:
+                    self.get_logger().info('Parsed mass from XACRO file directly (may be incomplete)')
+                    return mass
+            except Exception as e:
+                self.get_logger().debug(f'Could not parse XACRO directly: {e}')
+            
+            return None
+        except Exception as e:
+            self.get_logger().warn(f'Could not get aircraft mass: {e}')
+            return None
     
     def left_thrust_callback(self, msg):
         """Set left thruster command (in Newtons)"""
