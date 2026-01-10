@@ -90,25 +90,31 @@ This is the **default and recommended architecture** for development, testing, a
 ## Control Architecture Overview
 
 ### Option A (Primary — Guidance-Based)
-[Sensors / EKF]
-↓
-[AI Guidance Layer]
-(heading rate, speed)
-↓
-[Classical Controllers]
-(PID / control laws)
-↓
-[Actuators]
-(thrust, surfaces)
 
+```
+[Sensors / EKF]
+        ↓
+[AI Guidance Layer]
+ (heading rate, speed)
+        ↓
+[Classical Controllers]
+ (PID / control laws)
+        ↓
+[Actuators]
+ (thrust, surfaces)
+```
 
 ### Option B (Legacy — Direct Control)
+
+```
 [Sensors / EKF]
-↓
+        ↓
 [Neural Network]
-(thrust, yaw, surfaces)
-↓
+ (thrust, yaw, surfaces)
+        ↓
 [Actuators]
+```
+
 
 
 
