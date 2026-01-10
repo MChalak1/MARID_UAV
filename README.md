@@ -65,6 +65,29 @@ This structure mirrors real aerospace flight stacks and ensures safety, interpre
 
 ---
 
+## Control Architecture Options
+
+MARID supports multiple control architectures as part of ongoing research and experimentation.  
+Only **Option A** is used in the current primary workflow.
+
+### Option A — AI-Assisted Guidance (Recommended)
+- Neural networks operate at the **guidance level only**
+- AI outputs high-level targets such as desired heading rate and speed
+- Classical PID controllers handle all low-level actuation
+- Ensures safety, interpretability, and stability
+- Mirrors architectures used in real aerospace systems
+
+This is the **default and recommended architecture** for development, testing, and machine learning.
+
+### Option B — Direct Neural Control (Legacy / Experimental)
+- Neural networks output actuator-level commands (e.g. thrust, yaw differential)
+- Included for comparison and historical experimentation
+- **Not used** in the current control stack
+- Retained for research completeness only
+
+Most users and contributors should focus exclusively on **Option A**.
+
+
 ## 📊 System Architecture
 
 ### ROS 2 Packages
