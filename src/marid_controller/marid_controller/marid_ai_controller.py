@@ -450,14 +450,23 @@ class MaridAIController(Node):
     def get_state_vector(self):
         """
         Extract state vector from current sensor readings.
-        Returns: numpy array [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate, altitude]
+        Base state (12 dimensions): [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate]
+        Note: z (state[2]) represents altitude from EKF/odom. No redundant altitude dimension.
+        
+        Returns: numpy array [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate]
         """
-        state = np.zeros(13)
+        state = np.zeros(12)
         
         if self.current_odom_ is not None:
             state[0] = self.current_odom_.pose.pose.position.x
             state[1] = self.current_odom_.pose.pose.position.y
-            state[2] = self.current_odom_.pose.pose.position.z
+            # Use z from odom as altitude (EKF-filtered position)
+            # If barometric altitude is available, could optionally use that instead for state[2]
+            if self.current_altitude_ is not None:
+                # Prefer barometric altitude if available (more accurate for altitude)
+                state[2] = self.current_altitude_
+            else:
+                state[2] = self.current_odom_.pose.pose.position.z
             
             state[3] = self.current_odom_.twist.twist.linear.x
             state[4] = self.current_odom_.twist.twist.linear.y
@@ -474,11 +483,6 @@ class MaridAIController(Node):
             state[9] = self.current_imu_.angular_velocity.x
             state[10] = self.current_imu_.angular_velocity.y
             state[11] = self.current_imu_.angular_velocity.z
-        
-        if self.current_altitude_ is not None:
-            state[12] = self.current_altitude_
-        elif self.current_odom_ is not None:
-            state[12] = self.current_odom_.pose.pose.position.z
         
         return state
     
@@ -553,15 +557,16 @@ class MaridAIController(Node):
         """
         Compute control actions using AI model with waypoint navigation.
         
-        Creates a 21-dimensional extended state vector for the AI model:
-          Base state (13): [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate, altitude]
+        Creates a 20-dimensional extended state vector for the AI model:
+          Base state (12): [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate]
           Waypoint x, y (2): destination position in local coordinates
           Distance (1): distance to waypoint in meters
           Heading error (1): desired_heading - current_yaw, normalized to [-pi, pi]
           Altitude constraints (3): [altitude_min, altitude_max, target_altitude]
           Target velocity (1): desired velocity in m/s
+        Note: z (state[2]) represents altitude. No redundant altitude dimension.
         
-        Returns: (total_thrust, yaw_differential)
+        Returns: (total_thrust, yaw_differential) - Low-level commands (for now, will migrate to high-level)
         """
         if self.ai_model_ is None:
             return self.compute_pid_control(state)
@@ -581,21 +586,23 @@ class MaridAIController(Node):
             while heading_error < -math.pi:
                 heading_error += 2 * math.pi
             
-            # State vector format (21 dims): [base(13), waypoint_xy(2), distance(1), 
+            # State vector format (20 dims): [base(12), waypoint_xy(2), distance(1), 
             #                                heading_error(1), alt_constraints(3), target_vel(1)]
+            # Base state (12): [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate]
+            # Note: z (state[2]) is altitude, no redundant altitude dimension
             state_with_target = np.concatenate([
-                state,  # 13 dimensions: [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate, altitude]
-                [self.destination_[0], self.destination_[1]],  # Waypoint position: 2 dims → 15
-                [distance],  # Distance to waypoint: 1 dim → 16
-                [heading_error],  # Heading error: 1 dim → 17
-                [self.altitude_min_, self.altitude_max_, self.target_altitude_],  # Altitude constraints: 3 dims → 20
-                [self.target_velocity_]  # Target velocity: 1 dim → 21 total
+                state,  # 12 dimensions: [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate]
+                [self.destination_[0], self.destination_[1]],  # Waypoint position: 2 dims → 14
+                [distance],  # Distance to waypoint: 1 dim → 15
+                [heading_error],  # Heading error: 1 dim → 16
+                [self.altitude_min_, self.altitude_max_, self.target_altitude_],  # Altitude constraints: 3 dims → 19
+                [self.target_velocity_]  # Target velocity: 1 dim → 20 total
             ])
             
             # Validate state vector dimension before passing to model
-            if len(state_with_target) != 21:
+            if len(state_with_target) != 20:
                 self.get_logger().error(
-                    f'State vector dimension mismatch: expected 21, got {len(state_with_target)}. '
+                    f'State vector dimension mismatch: expected 20, got {len(state_with_target)}. '
                     f'Falling back to PID control.'
                 )
                 return self.compute_pid_control(state)

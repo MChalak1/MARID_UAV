@@ -4,9 +4,10 @@ MARID AI Model Wrapper
 Wrapper for loading and using trained neural network models.
 Supports PyTorch and TensorFlow models.
 
-State Vector Specification (21 dimensions):
-  Base state (13): [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate, altitude]
+State Vector Specification (20 dimensions):
+  Base state (12): [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate]
   Waypoint info (8): [waypoint_x, waypoint_y, distance_to_waypoint, heading_error, altitude_min, altitude_max, target_altitude, target_velocity]
+  Note: z (base state index 2) represents altitude from EKF/odom. No redundant altitude dimension.
   
 Output Action Vector (2 dimensions):
   [total_thrust, yaw_differential]
@@ -29,31 +30,39 @@ except ImportError:
     TENSORFLOW_AVAILABLE = False
 
 # State vector dimension constant
-STATE_DIM = 21
-ACTION_DIM = 2
+# Base state: 12-D (no redundant altitude)
+# Extended state: 20-D (12 base + 8 waypoint info)
+STATE_DIM = 20
+# Action dimension: will be 3 for high-level commands (heading_rate, speed, altitude_target)
+# Currently 2 for backward compatibility (thrust, yaw_diff) - will migrate to high-level
+ACTION_DIM = 2  # TODO: Migrate to 3-D for high-level: [desired_heading_rate, desired_speed, desired_altitude]
 
 
 class MaridAIModel:
     """
     Wrapper for AI model (PyTorch or TensorFlow).
     
-    State Vector (21 dimensions):
-        [0:3]   Position: x, y, z (m)
+    State Vector (20 dimensions):
+        [0:3]   Position: x, y, z (m) - Note: z is altitude from EKF/odom
         [3:6]   Linear velocity: vx, vy, vz (m/s)
         [6:9]   Attitude: roll, pitch, yaw (rad)
         [9:12]  Angular velocity: roll_rate, pitch_rate, yaw_rate (rad/s)
-        [12]    Altitude: current altitude (m)
-        [13:14] Waypoint position: waypoint_x, waypoint_y (m)
-        [15]    Distance to waypoint (m)
-        [16]    Heading error: desired_heading - current_yaw (rad, normalized [-pi, pi])
-        [17]    Altitude minimum constraint (m)
-        [18]    Altitude maximum constraint (m)
-        [19]    Target altitude (m)
-        [20]    Target velocity (m/s)
+        [12:13] Waypoint position: waypoint_x, waypoint_y (m)
+        [14]    Distance to waypoint (m)
+        [15]    Heading error: desired_heading - current_yaw (rad, normalized [-pi, pi])
+        [16]    Altitude minimum constraint (m)
+        [17]    Altitude maximum constraint (m)
+        [18]    Target altitude (m)
+        [19]    Target velocity (m/s)
         
-    Output Action Vector (2 dimensions):
-        [0] Total thrust (N)
-        [1] Yaw differential (rad/s or normalized differential)
+    Output Action Vector (currently 2-D, will migrate to 3-D high-level):
+        Current (low-level, backward compat):
+            [0] Total thrust (N)
+            [1] Yaw differential (rad/s or normalized differential)
+        Future (high-level, Option A):
+            [0] Desired heading rate (rad/s) or desired heading (rad)
+            [1] Desired speed (m/s)
+            [2] Desired altitude (m) [optional, can use existing PID]
     """
     def __init__(self, model_path=None, model_type='pytorch'):
         self.model_path_ = model_path
@@ -101,13 +110,14 @@ class MaridAIModel:
         Predict control action from state.
         
         Args:
-            state: numpy array of shape (21,) with state vector as specified in class docstring
-                  Expected order: [pos(3), vel(3), att(3), ang_vel(3), alt(1), 
+            state: numpy array of shape (20,) with state vector as specified in class docstring
+                  Expected order: [pos(3), vel(3), att(3), ang_vel(3), 
                                   waypoint(2), distance(1), heading_err(1), 
                                   alt_min(1), alt_max(1), target_alt(1), target_vel(1)]
-                  Indices: [0:12] base state, [13:14] waypoint, [15] distance, 
-                          [16] heading_err, [17] alt_min, [18] alt_max, 
-                          [19] target_alt, [20] target_vel
+                  Indices: [0:11] base state (12-D, z is altitude), [12:13] waypoint, [14] distance, 
+                          [15] heading_err, [16] alt_min, [17] alt_max, 
+                          [18] target_alt, [19] target_vel
+                  Note: Base state z (index 2) is altitude. No redundant altitude dimension.
         
         Returns:
             action: numpy array of shape (2,) - [total_thrust, yaw_differential]
@@ -161,8 +171,9 @@ if PYTORCH_AVAILABLE:
         """
         Neural network policy for MARID flight control.
         
-        Input: 21-dimensional state vector
-        Output: 2-dimensional action vector [total_thrust, yaw_differential]
+        Input: 20-dimensional state vector (12 base + 8 waypoint info)
+        Output: Currently 2-D [total_thrust, yaw_differential] for backward compatibility
+                Will migrate to 3-D high-level: [desired_heading_rate, desired_speed, desired_altitude]
         """
         def __init__(self, state_dim=STATE_DIM, action_dim=ACTION_DIM, hidden_dim=128):
             super(MaridPolicyNetwork, self).__init__()
