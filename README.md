@@ -324,6 +324,15 @@ This software is **simulation-only**. Thorough verification and validation are r
 
 ---
 
+## Further Reading and Technical Background
+
+Additional background, design rationale, and ongoing technical reflections related to the MARID project are documented externally:
+
+- Technical blog: https://www.blogger.com/blog/post/edit/7941702355038936306/5673750805561614405
+
+These materials provide supplementary context and are not required to understand or use the code in this repository.
+
+
 ## 📄 License
 
 **Research License**
