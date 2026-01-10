@@ -552,6 +552,15 @@ class MaridAIController(Node):
     def compute_ai_control(self, state):
         """
         Compute control actions using AI model with waypoint navigation.
+        
+        Creates a 21-dimensional extended state vector for the AI model:
+          Base state (13): [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate, altitude]
+          Waypoint x, y (2): destination position in local coordinates
+          Distance (1): distance to waypoint in meters
+          Heading error (1): desired_heading - current_yaw, normalized to [-pi, pi]
+          Altitude constraints (3): [altitude_min, altitude_max, target_altitude]
+          Target velocity (1): desired velocity in m/s
+        
         Returns: (total_thrust, yaw_differential)
         """
         if self.ai_model_ is None:
@@ -572,14 +581,24 @@ class MaridAIController(Node):
             while heading_error < -math.pi:
                 heading_error += 2 * math.pi
             
+            # State vector format (21 dims): [base(13), waypoint_xy(2), distance(1), 
+            #                                heading_error(1), alt_constraints(3), target_vel(1)]
             state_with_target = np.concatenate([
-                state,
-                [self.destination_[0], self.destination_[1]],  # Waypoint position
-                [distance],  # Distance to waypoint
-                [heading_error],  # Heading error
-                [self.altitude_min_, self.altitude_max_, self.target_altitude_],  # Altitude constraints
-                [self.target_velocity_]  # Target velocity
+                state,  # 13 dimensions: [x, y, z, vx, vy, vz, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate, altitude]
+                [self.destination_[0], self.destination_[1]],  # Waypoint position: 2 dims → 15
+                [distance],  # Distance to waypoint: 1 dim → 16
+                [heading_error],  # Heading error: 1 dim → 17
+                [self.altitude_min_, self.altitude_max_, self.target_altitude_],  # Altitude constraints: 3 dims → 20
+                [self.target_velocity_]  # Target velocity: 1 dim → 21 total
             ])
+            
+            # Validate state vector dimension before passing to model
+            if len(state_with_target) != 21:
+                self.get_logger().error(
+                    f'State vector dimension mismatch: expected 21, got {len(state_with_target)}. '
+                    f'Falling back to PID control.'
+                )
+                return self.compute_pid_control(state)
             
             # Get action from AI model
             action = self.ai_model_.predict(state_with_target)
@@ -590,6 +609,11 @@ class MaridAIController(Node):
             
             return total_thrust, yaw_differential
             
+        except ValueError as e:
+            # Catch dimension mismatch or invalid state errors from model wrapper
+            self.get_logger().error(f'AI model state validation failed: {e}')
+            self.get_logger().warn('Falling back to PID control')
+            return self.compute_pid_control(state)
         except Exception as e:
             self.get_logger().error(f'AI model prediction failed: {e}')
             self.get_logger().warn('Falling back to PID control')

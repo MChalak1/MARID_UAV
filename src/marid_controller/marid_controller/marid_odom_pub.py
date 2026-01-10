@@ -310,15 +310,15 @@ class MaridOdomPublisher(Node):
         
         # Broadcast TF only if enabled (EKF should handle TF publishing)
         if self.publish_tf_:
-            self.transform_stamped_.header.stamp = now.to_msg()
-            self.transform_stamped_.transform.translation.x = self.x_
-            self.transform_stamped_.transform.translation.y = self.y_
-            self.transform_stamped_.transform.translation.z = self.z_
-            self.transform_stamped_.transform.rotation.x = self.qx_
-            self.transform_stamped_.transform.rotation.y = self.qy_
-            self.transform_stamped_.transform.rotation.z = self.qz_
-            self.transform_stamped_.transform.rotation.w = self.qw_
-            self.br_.sendTransform(self.transform_stamped_)
+        self.transform_stamped_.header.stamp = now.to_msg()
+        self.transform_stamped_.transform.translation.x = self.x_
+        self.transform_stamped_.transform.translation.y = self.y_
+        self.transform_stamped_.transform.translation.z = self.z_
+        self.transform_stamped_.transform.rotation.x = self.qx_
+        self.transform_stamped_.transform.rotation.y = self.qy_
+        self.transform_stamped_.transform.rotation.z = self.qz_
+        self.transform_stamped_.transform.rotation.w = self.qw_
+        self.br_.sendTransform(self.transform_stamped_)
         
         # Publish diagnostics periodically (every 2 seconds)
         if self.integration_count_ % (int(self.publish_rate_) * 2) == 0:
