@@ -280,20 +280,23 @@ normalizer.save("normalizer.json")
 
 ```
 MARID_UAV/
-├── src/
-│   ├── marid_description/
-│   ├── marid_localization/
-│   └── marid_controller/
-│       ├── marid_ai_guidance.py
-│       ├── marid_attitude_controller.py
-│       ├── marid_thrust_controller.py
-│       ├── marid_data_logger.py
-│       ├── marid_safety_node.py
-│       ├── ai_model.py
-│       └── state_normalizer.py
-├── OPTION_A_IMPLEMENTATION.md
-├── VERIFICATION_CHECKLIST.md
-└── README.md
+src/
+└── marid_controller/
+    ├── launch/
+    ├── marid_controller/
+    │   ├── marid_ai_guidance.py
+    │   ├── marid_guidance_tracker.py
+    │   ├── marid_ai_controller.py        (legacy Option B)
+    │   ├── marid_attitude_controller.py
+    │   ├── marid_thrust_controller.py
+    │   ├── marid_data_logger.py
+    │   ├── marid_safety_node.py
+    │   ├── ai_model.py
+    │   └── state_normalizer.py
+    ├── package.xml
+    ├── setup.py
+    └── CMakeLists.txt
+
 ```
 
 ---
