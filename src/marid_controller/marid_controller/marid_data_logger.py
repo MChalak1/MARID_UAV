@@ -122,7 +122,7 @@ class MaridDataLogger(Node):
         
         self.yaw_diff_sub_ = self.create_subscription(
             Float64,
-            '/marid/yaw/differential',
+            '/marid/thrust/yaw_differential',  # Match topic name from guidance tracker / old AI controller
             self.yaw_diff_callback,
             10
         )

@@ -33,6 +33,8 @@ install(PROGRAMS
   marid_controller/marid_safety_node.py
   marid_controller/marid_attitude_controller.py
   marid_controller/marid_data_logger.py
+  marid_controller/marid_ai_guidance.py
+  marid_controller/marid_guidance_tracker.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
