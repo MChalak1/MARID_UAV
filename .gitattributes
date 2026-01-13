@@ -1,0 +1,23 @@
+# Ensure Python files always use Unix line endings
+*.py text eol=lf
+*.launch.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+*.xacro text eol=lf
+*.urdf text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+
+# CMake files
+CMakeLists.txt text eol=lf
+*.cmake text eol=lf
+
+# Package files
+package.xml text eol=lf
+setup.py text eol=lf
+setup.cfg text eol=lf

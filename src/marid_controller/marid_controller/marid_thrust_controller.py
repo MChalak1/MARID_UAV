@@ -339,8 +339,8 @@ class MaridThrustController(Node):
     
     def yaw_differential_callback(self, msg):
         """Set yaw differential (-1.0 to 1.0)
-        Negative = more left thrust (yaw right)
-        Positive = more right thrust (yaw left)
+        Positive = more left thrust (turn right / positive yaw)
+        Negative = more right thrust (turn left / negative yaw)
         """
         if self.enable_differential_:
             self.yaw_differential_ = max(-1.0, min(1.0, msg.data))
@@ -357,14 +357,18 @@ class MaridThrustController(Node):
         with self.thrust_lock_:
             if self.enable_differential_:
                 # Apply differential thrust for yaw control
-                # yaw_differential > 0 means yaw left, so increase right thrust
-                # yaw_differential < 0 means yaw right, so increase left thrust
-                differential_gain = 0.2  # Max 20% differential
+                # yaw_differential > 0 means turn right (positive yaw), so increase left thrust
+                # yaw_differential < 0 means turn left (negative yaw), so increase right thrust
+                # To turn right: more left thrust creates positive yaw torque
+                # To turn left: more right thrust creates negative yaw torque
+                differential_gain = 1.0  # Max 100% differential (full range for effective steering)
                 base_thrust = self.current_thrust_
                 differential = self.yaw_differential_ * differential_gain * base_thrust
                 
-                left_thrust = self.left_thrust_ - differential
-                right_thrust = self.right_thrust_ + differential
+                # Positive differential → more left thrust → turn right
+                # Negative differential → more right thrust → turn left
+                left_thrust = self.left_thrust_ + differential
+                right_thrust = self.right_thrust_ - differential
             else:
                 # Equal thrust to both (simplified mode)
                 left_thrust = self.left_thrust_
@@ -400,6 +404,19 @@ class MaridThrustController(Node):
         left_thrust, right_thrust = self.calculate_thrust_values()
         total_thrust = left_thrust + right_thrust
         
+        # Calculate yaw torque from differential thrust
+        # Differential creates a moment arm effect for steering
+        # If left_thrust > right_thrust, we want positive yaw (turn right)
+        # If right_thrust > left_thrust, we want negative yaw (turn left)
+        # Note: thrust_differential = right - left, so we need to negate it for correct yaw direction
+        thrust_differential = right_thrust - left_thrust
+        # Convert differential to yaw torque
+        # Assume thrusters are ~0.5m apart (adjust based on your model)
+        thruster_separation = 0.5  # meters (distance between left and right thrusters)
+        # Scale factor to convert force difference to torque (adjust for your model)
+        # Negate because: left_thrust > right_thrust → negative differential → should give positive yaw
+        yaw_torque_z = -thrust_differential * thruster_separation * 0.5
+        
         # Create EntityWrench message in protobuf text format (not JSON!)
         # gz topic -p expects protobuf DebugString format
         # Use entity ID instead of name (more reliable)
@@ -430,7 +447,7 @@ wrench {{
   torque {{
     x: {compensating_torque_x}
     y: 0.0
-    z: 0.0
+    z: {yaw_torque_z}
   }}
 }}'''
         
