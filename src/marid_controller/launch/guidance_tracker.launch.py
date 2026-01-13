@@ -19,7 +19,6 @@ def generate_launch_description():
                     parameters=[{
                         'update_rate': 50.0,
                         'thrust_to_weight_ratio': 2.5,
-                        'max_thrust': None,
                         'min_thrust': 0.0,
                         'max_yaw_differential': 0.2,
                         'speed_kp': 1.0,

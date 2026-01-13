@@ -59,7 +59,6 @@ def generate_launch_description():
             parameters=[{
                 'initial_thrust': 0.0,
                 'min_thrust': 0.0,
-                'max_thrust': None,  # Auto-calculate from mass
                 'thrust_to_weight_ratio': 2.5,
                 'thrust_increment': 1.0,
                 'world_name': 'wt',
@@ -125,7 +124,6 @@ def generate_launch_description():
                         'update_rate': 50.0,
                         # Thrust parameters
                         'thrust_to_weight_ratio': 2.5,
-                        'max_thrust': None,  # Auto-calculate
                         'min_thrust': 0.0,
                         'max_yaw_differential': 0.2,
                         # PID gains for tracking guidance targets
