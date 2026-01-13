@@ -65,6 +65,59 @@ This structure mirrors real aerospace flight stacks and ensures safety, interpre
 
 ---
 
+## Control Architecture Options
+
+MARID supports multiple control architectures as part of ongoing research and experimentation.  
+Only **Option A** is used in the current primary workflow.
+
+### Option A — AI-Assisted Guidance (Recommended)
+- Neural networks operate at the **guidance level only**
+- AI outputs high-level targets such as desired heading rate and speed
+- Classical PID controllers handle all low-level actuation
+- Ensures safety, interpretability, and stability
+- Mirrors architectures used in real aerospace systems
+
+This is the **default and recommended architecture** for development, testing, and machine learning.
+
+### Option B — Direct Neural Control (Legacy / Experimental)
+- Neural networks output actuator-level commands (e.g. thrust, yaw differential)
+- Included for comparison and historical experimentation
+- **Not used** in the current control stack
+- Retained for research completeness only
+
+### Control Architecture Overview
+
+## Control Architecture Overview
+
+### Option A (Primary — Guidance-Based)
+
+```
+[Sensors / EKF]
+        ↓
+[AI Guidance Layer]
+ (heading rate, speed)
+        ↓
+[Classical Controllers]
+ (PID / control laws)
+        ↓
+[Actuators]
+ (thrust, surfaces)
+```
+
+### Option B (Legacy — Direct Control)
+
+```
+[Sensors / EKF]
+        ↓
+[Neural Network]
+ (thrust, yaw, surfaces)
+        ↓
+[Actuators]
+```
+
+
+
+
 ## 📊 System Architecture
 
 ### ROS 2 Packages
@@ -228,20 +281,23 @@ normalizer.save("normalizer.json")
 
 ```
 MARID_UAV/
-├── src/
-│   ├── marid_description/
-│   ├── marid_localization/
-│   └── marid_controller/
-│       ├── marid_ai_guidance.py
-│       ├── marid_attitude_controller.py
-│       ├── marid_thrust_controller.py
-│       ├── marid_data_logger.py
-│       ├── marid_safety_node.py
-│       ├── ai_model.py
-│       └── state_normalizer.py
-├── OPTION_A_IMPLEMENTATION.md
-├── VERIFICATION_CHECKLIST.md
-└── README.md
+src/
+└── marid_controller/
+    ├── launch/
+    ├── marid_controller/
+    │   ├── marid_ai_guidance.py
+    │   ├── marid_guidance_tracker.py
+    │   ├── marid_ai_controller.py        (legacy Option B)
+    │   ├── marid_attitude_controller.py
+    │   ├── marid_thrust_controller.py
+    │   ├── marid_data_logger.py
+    │   ├── marid_safety_node.py
+    │   ├── ai_model.py
+    │   └── state_normalizer.py
+    ├── package.xml
+    ├── setup.py
+    └── CMakeLists.txt
+
 ```
 
 ---
@@ -271,6 +327,15 @@ Some aspects of the MARID concept are under active patent protection; sensitive 
 This software is **simulation-only**. Thorough verification and validation are required before any physical deployment.
 
 ---
+
+## Further Reading and Technical Background
+
+Additional background, design rationale, and ongoing technical reflections related to the MARID project are documented externally:
+
+- Technical blog: https://www.blogger.com/blog/post/edit/7941702355038936306/5673750805561614405
+
+These materials provide supplementary context and are not required to understand or use the code in this repository.
+
 
 ## 📄 License
 
