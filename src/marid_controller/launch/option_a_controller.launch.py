@@ -64,9 +64,11 @@ def generate_launch_description():
                 'world_name': 'wt',
                 'model_name': 'marid',
                 'link_name': 'base_link_front',
-                'update_rate': 10.0,
+                'update_rate': 50.0,  # Increased to match thruster plugin update rate
                 'enable_keyboard': False,  # Disabled in Option A (guidance controls it)
                 'enable_differential': True,  # Enable differential for yaw control
+                'thrust_to_angvel_gain': 50.0,  # Conversion factor: omega = gain * sqrt(thrust)
+                'use_thruster_plugin': True,  # Use Gazebo Thruster plugin (True) or legacy wrench (False)
                 'use_sim_time': True,
             }]
         ),
@@ -131,9 +133,9 @@ def generate_launch_description():
                         'use_airspeed_sensor': True,
                         'drag_coefficient': 0.1,  # Tune based on your model
                         'air_density': 1.225,  # kg/m³ at sea level
-                        # Wind vector (from world file: [0, 1, 0] m/s)
+                        # Wind vector (from world file: [0, 0, 0] m/s - disabled for testing)
                         'wind_x': 0.0,
-                        'wind_y': 1.0,
+                        'wind_y': 0.0,
                         'wind_z': 0.0,
                         # PID gains for tracking guidance targets
                         'speed_kp': 1.0,

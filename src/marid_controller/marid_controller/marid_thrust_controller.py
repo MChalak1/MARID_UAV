@@ -14,6 +14,7 @@ import sys
 import subprocess
 import os
 import time
+import math
 import xml.etree.ElementTree as ET
 
 
@@ -74,9 +75,11 @@ class MaridThrustController(Node):
         self.declare_parameter('world_name', 'wt')            # Gazebo world name
         self.declare_parameter('model_name', 'marid')         # Model name
         self.declare_parameter('link_name', 'base_link_front') # Link to apply force to
-        self.declare_parameter('update_rate', 10.0)           # Update rate for persistent wrench (Hz)
+        self.declare_parameter('update_rate', 50.0)           # Update rate for thruster commands (Hz)
         self.declare_parameter('enable_keyboard', True)       # Enable keyboard control
         self.declare_parameter('enable_differential', False)  # Enable differential thrust for yaw control
+        self.declare_parameter('thrust_to_angvel_gain', 50.0)  # Conversion factor: omega = gain * sqrt(thrust)
+        self.declare_parameter('use_thruster_plugin', True)    # Use Gazebo Thruster plugin (True) or legacy wrench (False)
         
         self.initial_thrust_ = self.get_parameter('initial_thrust').value
         self.min_thrust_ = self.get_parameter('min_thrust').value
@@ -110,6 +113,8 @@ class MaridThrustController(Node):
         self.link_name_ = self.get_parameter('link_name').value
         self.enable_keyboard_ = self.get_parameter('enable_keyboard').value
         self.enable_differential_ = self.get_parameter('enable_differential').value
+        self.thrust_to_angvel_gain_ = self.get_parameter('thrust_to_angvel_gain').value
+        self.use_thruster_plugin_ = self.get_parameter('use_thruster_plugin').value
         
         # Current thrust values in Newtons (absolute, not ratio)
         self.current_thrust_ = self.initial_thrust_
@@ -122,10 +127,27 @@ class MaridThrustController(Node):
         # Differential thrust for yaw control (will be set by attitude controller)
         self.yaw_differential_ = 0.0  # -1.0 to 1.0, negative = yaw left, positive = yaw right
         
-        # Use ApplyLinkWrench plugin (in world) via direct gz topic publishing
-        # Use persistent topic (applies continuously until cleared or updated)
-        self.world_name_ = self.get_parameter('world_name').value
-        self.wrench_topic_ = f'/world/{self.world_name_}/wrench/persistent'
+        # Publishers for thruster angular velocity commands (if using Thruster plugin)
+        # Note: Gazebo Sim 8 Thruster plugin uses default topic pattern:
+        # /model/{namespace}/joint/{joint_name}/cmd_vel (when use_angvel_cmd=true)
+        if self.use_thruster_plugin_:
+            self.left_thruster_cmd_pub_ = self.create_publisher(
+                Float64,
+                '/model/marid/joint/thruster_L_joint/cmd_vel',
+                10
+            )
+            self.right_thruster_cmd_pub_ = self.create_publisher(
+                Float64,
+                '/model/marid/joint/thruster_R_joint/cmd_vel',
+                10
+            )
+            self.get_logger().info('Using Gazebo Thruster plugin (angular velocity commands)')
+            self.get_logger().info('Publishing to: /model/marid/joint/thruster_L_joint/cmd_vel and /model/marid/joint/thruster_R_joint/cmd_vel')
+        else:
+            # Legacy: Use ApplyLinkWrench plugin (in world) via direct gz topic publishing
+            # Use persistent topic (applies continuously until cleared or updated)
+            self.wrench_topic_ = f'/world/{self.world_name_}/wrench/persistent'
+            self.get_logger().info('Using legacy ApplyLinkWrench plugin (wrench commands)')
         
         # Subscribe to thrust commands (in Newtons)
         self.left_thrust_sub_ = self.create_subscription(
@@ -204,9 +226,13 @@ class MaridThrustController(Node):
         if self.enable_keyboard_ and PYNPUT_AVAILABLE:
             self.get_logger().info('Keyboard control: UP arrow = +1N, DOWN arrow = -1N')
         self.get_logger().info(f'Differential thrust: {"enabled" if self.enable_differential_ else "disabled"}')
-        self.get_logger().info(f'Using ApplyLinkWrench plugin via: {self.wrench_topic_}')
-        self.get_logger().info(f'Entity ID: 11 (base_link_front)')
-        self.get_logger().info('Publishing EntityWrench messages directly to Gazebo using gz topic commands')
+        if self.use_thruster_plugin_:
+            self.get_logger().info(f'Thrust-to-angular-velocity gain: {self.thrust_to_angvel_gain_:.2f}')
+            self.get_logger().info('Publishing angular velocity commands to Gazebo Thruster plugins')
+        else:
+            self.get_logger().info(f'Using ApplyLinkWrench plugin via: {self.wrench_topic_}')
+            self.get_logger().info(f'Entity ID: 11 (base_link_front)')
+            self.get_logger().info('Publishing EntityWrench messages directly to Gazebo using gz topic commands')
         self.get_logger().info('Checking for model spawn before applying thrust...')
     
     def start_keyboard_listener(self):
@@ -396,46 +422,79 @@ class MaridThrustController(Node):
             self.get_logger().info('Initial thrust call completed. Timer will continue at 10 Hz.')
     
     def apply_thrust(self):
-        """Apply thrust using gz topic command to publish EntityWrench to ApplyLinkWrench plugin"""
+        """Apply thrust using Gazebo Thruster plugin (angular velocity commands) or legacy wrench"""
         # Don't apply thrust until model is spawned
         if not self.thrust_started_:
             return
         
         left_thrust, right_thrust = self.calculate_thrust_values()
-        total_thrust = left_thrust + right_thrust
         
-        # Calculate yaw torque from differential thrust
-        # Differential creates a moment arm effect for steering
-        # If left_thrust > right_thrust, we want positive yaw (turn right)
-        # If right_thrust > left_thrust, we want negative yaw (turn left)
-        # Note: thrust_differential = right - left, so we need to negate it for correct yaw direction
-        thrust_differential = right_thrust - left_thrust
-        # Convert differential to yaw torque
-        # Assume thrusters are ~0.5m apart (adjust based on your model)
-        thruster_separation = 0.5  # meters (distance between left and right thrusters)
-        # Scale factor to convert force difference to torque (adjust for your model)
-        # Negate because: left_thrust > right_thrust → negative differential → should give positive yaw
-        yaw_torque_z = -thrust_differential * thruster_separation * 0.5
-        
-        # Create EntityWrench message in protobuf text format (not JSON!)
-        # gz topic -p expects protobuf DebugString format
-        # Use entity ID instead of name (more reliable)
-        # Entity ID 11 = base_link_front (from gz model -m marid -l output)
-        # If entity ID changes, we can query it dynamically, but for now use fixed ID
-        entity_id = 11  # base_link_front link ID
-        
-        # Protobuf text format using entity ID
-        # To apply force at center of mass (offset: 0, 0.1, 0.02 from link origin),
-        # we need to add compensating torque: torque = offset × force
-        # offset = (0, 0.1, 0.02), force = (0, total_thrust, 0)
-        # torque = offset × force = (0.1*0 - 0.02*total_thrust, 0.02*0 - 0*0, 0*0 - 0.1*0)
-        # torque = (-0.02*total_thrust, 0, 0)  [cross product]
-        # Actually: torque_x = offset_y * force_z - offset_z * force_y = 0.1*0 - 0.02*total_thrust = -0.02*total_thrust
-        #          torque_y = offset_z * force_x - offset_x * force_z = 0.02*0 - 0*0 = 0
-        #          torque_z = offset_x * force_y - offset_y * force_x = 0*total_thrust - 0.1*0 = 0
-        compensating_torque_x = -0.02 * total_thrust  # Negative because force is +Y, offset is +Z
-        
-        entity_wrench_proto = f'''entity {{
+        if self.use_thruster_plugin_:
+            # ===== NEW: Use Gazebo Thruster Plugin =====
+            # Convert thrust (N) to angular velocity (rad/s)
+            # Simplified model: omega = gain * sqrt(thrust)
+            # More realistic would account for propeller diameter, density, etc.
+            # The gain parameter can be tuned based on testing
+            left_omega = self.thrust_to_angvel_gain_ * math.sqrt(max(0.0, left_thrust))
+            right_omega = self.thrust_to_angvel_gain_ * math.sqrt(max(0.0, right_thrust))
+            
+            # Publish angular velocity commands
+            left_cmd = Float64()
+            left_cmd.data = left_omega
+            self.left_thruster_cmd_pub_.publish(left_cmd)
+            
+            right_cmd = Float64()
+            right_cmd.data = right_omega
+            self.right_thruster_cmd_pub_.publish(right_cmd)
+            
+            # Log periodically (every 50 calls at 50 Hz = every 1 second)
+            if not hasattr(self, '_thruster_log_counter'):
+                self._thruster_log_counter = 0
+            self._thruster_log_counter += 1
+            
+            if self._thruster_log_counter == 1:
+                self.get_logger().info('Thruster commands published successfully!')
+            elif self._thruster_log_counter % 50 == 0:
+                self.get_logger().debug(
+                    f'Thruster commands: L={left_thrust:.2f}N→{left_omega:.1f}rad/s, '
+                    f'R={right_thrust:.2f}N→{right_omega:.1f}rad/s'
+                )
+        else:
+            # ===== LEGACY: Use ApplyLinkWrench Plugin =====
+            total_thrust = left_thrust + right_thrust
+            
+            # Calculate yaw torque from differential thrust
+            # Differential creates a moment arm effect for steering
+            # If left_thrust > right_thrust, we want positive yaw (turn right)
+            # If right_thrust > left_thrust, we want negative yaw (turn left)
+            # Note: thrust_differential = right - left, so we need to negate it for correct yaw direction
+            thrust_differential = right_thrust - left_thrust
+            # Convert differential to yaw torque
+            # Assume thrusters are ~0.5m apart (adjust based on your model)
+            thruster_separation = 0.5  # meters (distance between left and right thrusters)
+            # Scale factor to convert force difference to torque (adjust for your model)
+            # Negate because: left_thrust > right_thrust → negative differential → should give positive yaw
+            yaw_torque_z = -thrust_differential * thruster_separation * 0.5
+            
+            # Create EntityWrench message in protobuf text format (not JSON!)
+            # gz topic -p expects protobuf DebugString format
+            # Use entity ID instead of name (more reliable)
+            # Entity ID 11 = base_link_front (from gz model -m marid -l output)
+            # If entity ID changes, we can query it dynamically, but for now use fixed ID
+            entity_id = 11  # base_link_front link ID
+            
+            # Protobuf text format using entity ID
+            # To apply force at center of mass (offset: 0, 0.1, 0.02 from link origin),
+            # we need to add compensating torque: torque = offset × force
+            # offset = (0, 0.1, 0.02), force = (0, total_thrust, 0)
+            # torque = offset × force = (0.1*0 - 0.02*total_thrust, 0.02*0 - 0*0, 0*0 - 0.1*0)
+            # torque = (-0.02*total_thrust, 0, 0)  [cross product]
+            # Actually: torque_x = offset_y * force_z - offset_z * force_y = 0.1*0 - 0.02*total_thrust = -0.02*total_thrust
+            #          torque_y = offset_z * force_x - offset_x * force_z = 0.02*0 - 0*0 = 0
+            #          torque_z = offset_x * force_y - offset_y * force_x = 0*total_thrust - 0.1*0 = 0
+            compensating_torque_x = -0.02 * total_thrust  # Negative because force is +Y, offset is +Z
+            
+            entity_wrench_proto = f'''entity {{
   id: {entity_id}
 }}
 wrench {{
@@ -450,92 +509,92 @@ wrench {{
     z: {yaw_torque_z}
   }}
 }}'''
-        
-        # Use gz topic pub to publish directly to Gazebo (bypasses bridge issues)
-        # Retry up to 3 times with increasing timeout
-        max_retries = 3
-        timeout = 5.0  # Increased from 2.0 to 5.0 seconds
-        
-        for attempt in range(max_retries):
-            try:
-                # Ensure we have the full path to gz or use shell=True
-                env = dict(os.environ)
-                # Use shell=True to ensure proper PATH resolution and environment
-                cmd_str = f'gz topic -t {self.wrench_topic_} -m gz.msgs.EntityWrench -p \'{entity_wrench_proto}\''
-                
-                result = subprocess.run(
-                    cmd_str,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    env=env,
-                    executable='/bin/bash'
-                )
-                
-                if result.returncode == 0:
-                    # Command succeeded
-                    if not hasattr(self, '_success_counter'):
-                        self._success_counter = 0
-                    self._success_counter += 1
-                    if self._success_counter == 1:
-                        self.get_logger().info('gz topic command succeeded! Thrust should be applied.')
-                    elif self._success_counter % 50 == 0:
-                        self.get_logger().debug(f'gz topic command succeeded ({self._success_counter} times)')
-                    return  # Success, exit retry loop
-                else:
-                    # Command failed but didn't timeout
-                    if attempt == max_retries - 1:  # Last attempt
-                        self.get_logger().error(f'gz topic command failed after {max_retries} attempts (code {result.returncode})')
-                        if result.stderr:
-                            self.get_logger().error(f'stderr: {result.stderr[:300]}')
-                        if result.stdout:
-                            self.get_logger().error(f'stdout: {result.stdout[:300]}')
-                        if not hasattr(self, '_cmd_logged'):
-                            self.get_logger().error(f'Failed command: {cmd_str[:200]}')
-                            self.get_logger().error(f'Message payload: {entity_wrench_proto[:200]}')
-                            self._cmd_logged = True
+            
+            # Use gz topic pub to publish directly to Gazebo (bypasses bridge issues)
+            # Retry up to 3 times with increasing timeout
+            max_retries = 3
+            timeout = 5.0  # Increased from 2.0 to 5.0 seconds
+            
+            for attempt in range(max_retries):
+                try:
+                    # Ensure we have the full path to gz or use shell=True
+                    env = dict(os.environ)
+                    # Use shell=True to ensure proper PATH resolution and environment
+                    cmd_str = f'gz topic -t {self.wrench_topic_} -m gz.msgs.EntityWrench -p \'{entity_wrench_proto}\''
+                    
+                    result = subprocess.run(
+                        cmd_str,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        env=env,
+                        executable='/bin/bash'
+                    )
+                    
+                    if result.returncode == 0:
+                        # Command succeeded
+                        if not hasattr(self, '_success_counter'):
+                            self._success_counter = 0
+                        self._success_counter += 1
+                        if self._success_counter == 1:
+                            self.get_logger().info('gz topic command succeeded! Thrust should be applied.')
+                        elif self._success_counter % 50 == 0:
+                            self.get_logger().debug(f'gz topic command succeeded ({self._success_counter} times)')
+                        return  # Success, exit retry loop
                     else:
-                        self.get_logger().warn(f'gz topic command failed (attempt {attempt + 1}/{max_retries}), retrying...')
-                        time.sleep(0.5)  # Brief delay before retry
+                        # Command failed but didn't timeout
+                        if attempt == max_retries - 1:  # Last attempt
+                            self.get_logger().error(f'gz topic command failed after {max_retries} attempts (code {result.returncode})')
+                            if result.stderr:
+                                self.get_logger().error(f'stderr: {result.stderr[:300]}')
+                            if result.stdout:
+                                self.get_logger().error(f'stdout: {result.stdout[:300]}')
+                            if not hasattr(self, '_cmd_logged'):
+                                self.get_logger().error(f'Failed command: {cmd_str[:200]}')
+                                self.get_logger().error(f'Message payload: {entity_wrench_proto[:200]}')
+                                self._cmd_logged = True
+                        else:
+                            self.get_logger().warn(f'gz topic command failed (attempt {attempt + 1}/{max_retries}), retrying...')
+                            time.sleep(0.5)  # Brief delay before retry
+                            continue
+                    
+                except subprocess.TimeoutExpired:
+                    if attempt == max_retries - 1:  # Last attempt
+                        self.get_logger().error(f'gz topic command timed out after {max_retries} attempts. Is Gazebo running?')
+                        if not hasattr(self, '_timeout_logged'):
+                            self.get_logger().error('Make sure Gazebo is running and the model is spawned before starting the thrust controller.')
+                            self._timeout_logged = True
+                    else:
+                        self.get_logger().warn(f'gz topic command timed out (attempt {attempt + 1}/{max_retries}), retrying with longer timeout...')
+                        timeout += 2.0  # Increase timeout for next attempt
+                        time.sleep(0.5)
                         continue
-                
-            except subprocess.TimeoutExpired:
-                if attempt == max_retries - 1:  # Last attempt
-                    self.get_logger().error(f'gz topic command timed out after {max_retries} attempts. Is Gazebo running?')
-                    if not hasattr(self, '_timeout_logged'):
-                        self.get_logger().error('Make sure Gazebo is running and the model is spawned before starting the thrust controller.')
-                        self._timeout_logged = True
-                else:
-                    self.get_logger().warn(f'gz topic command timed out (attempt {attempt + 1}/{max_retries}), retrying with longer timeout...')
-                    timeout += 2.0  # Increase timeout for next attempt
-                    time.sleep(0.5)
-                    continue
-            except Exception as e:
-                if attempt == max_retries - 1:  # Last attempt
-                    if not hasattr(self, '_exception_logged'):
-                        self.get_logger().error(f'Error publishing wrench after {max_retries} attempts: {str(e)[:200]}')
-                        self._exception_logged = True
-                else:
-                    self.get_logger().warn(f'Error on attempt {attempt + 1}/{max_retries}: {str(e)[:100]}, retrying...')
-                    time.sleep(0.5)
-                    continue
-        
-        # If we get here, all retries failed
-        # Log periodically (every 5 seconds at 10 Hz = every 50 calls)
-        if hasattr(self, '_log_counter'):
-            self._log_counter += 1
-        else:
-            self._log_counter = 0
-        
-        if self._log_counter % 50 == 0:
-            with self.thrust_lock_:
-                current = self.current_thrust_
-            self.get_logger().warn(
-                f'Failed to apply thrust via ApplyLinkWrench: L={left_thrust:.2f}N, R={right_thrust:.2f}N, Total={total_thrust:.2f}N (Current: {current:.2f}N)'
-            )
-            self.get_logger().warn(f'Topic: {self.wrench_topic_}, Entity ID: {entity_id} (base_link_front)')
-            self.get_logger().warn('Check that Gazebo is running and the model is spawned.')
+                except Exception as e:
+                    if attempt == max_retries - 1:  # Last attempt
+                        if not hasattr(self, '_exception_logged'):
+                            self.get_logger().error(f'Error publishing wrench after {max_retries} attempts: {str(e)[:200]}')
+                            self._exception_logged = True
+                    else:
+                        self.get_logger().warn(f'Error on attempt {attempt + 1}/{max_retries}: {str(e)[:100]}, retrying...')
+                        time.sleep(0.5)
+                        continue
+            
+            # If we get here, all retries failed
+            # Log periodically (every 5 seconds at 10 Hz = every 50 calls)
+            if hasattr(self, '_log_counter'):
+                self._log_counter += 1
+            else:
+                self._log_counter = 0
+            
+            if self._log_counter % 50 == 0:
+                with self.thrust_lock_:
+                    current = self.current_thrust_
+                self.get_logger().warn(
+                    f'Failed to apply thrust via ApplyLinkWrench: L={left_thrust:.2f}N, R={right_thrust:.2f}N, Total={total_thrust:.2f}N (Current: {current:.2f}N)'
+                )
+                self.get_logger().warn(f'Topic: {self.wrench_topic_}, Entity ID: {entity_id} (base_link_front)')
+                self.get_logger().warn('Check that Gazebo is running and the model is spawned.')
     
     def destroy_node(self):
         """Clean up keyboard listener on shutdown"""

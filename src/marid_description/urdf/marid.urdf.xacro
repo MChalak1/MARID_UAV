@@ -340,16 +340,22 @@
       <collision><origin xyz="0 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
   </link>
 
-  <joint name="thruster_L_joint" type="fixed">
+  <joint name="thruster_L_joint" type="revolute">
     <parent link="base_link_front"/>
     <child  link="thruster_L"/>
     <origin xyz="-0.30  0.20 -0.05" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>  <!-- Rotate around Y-axis (forward direction) -->
+    <limit lower="-3.14159" upper="3.14159" effort="100" velocity="100"/>
+    <dynamics damping="0.01" friction="0.0"/>
   </joint>
 
-  <joint name="thruster_R_joint" type="fixed">
+  <joint name="thruster_R_joint" type="revolute">
     <parent link="base_link_front"/>
     <child  link="thruster_R"/>
     <origin xyz="0.30 0.20 -0.05" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>  <!-- Rotate around Y-axis (forward direction) -->
+    <limit lower="-3.14159" upper="3.14159" effort="100" velocity="100"/>
+    <dynamics damping="0.01" friction="0.0"/>
   </joint>
 
 </robot>

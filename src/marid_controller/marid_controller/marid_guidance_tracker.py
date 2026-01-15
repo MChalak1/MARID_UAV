@@ -48,22 +48,49 @@ class PIDController:
             self.last_error = error
             return 0.0
         
+        # Check for invalid time or error (NaN/inf protection)
+        if not np.isfinite(current_time) or not np.isfinite(error):
+            return 0.0
+        
         dt = current_time - self.last_time
-        if dt <= 0:
+        
+        # Handle timing issues from lag:
+        # - dt <= 0: invalid or clock jumped backward
+        # - dt too small: numerical issues (less than 1ms)
+        # - dt too large: system lagged (more than 1 second)
+        if dt <= 0 or dt < 0.001:
+            return 0.0  # Skip update if timing is invalid
+        
+        if dt > 1.0:
+            # System lagged significantly - reset to prevent integral windup
+            self.integral = 0.0
+            self.last_time = current_time
+            self.last_error = error
             return 0.0
         
         # Proportional term
         p_term = self.kp * error
         
-        # Integral term
+        # Integral term (with anti-windup protection)
         self.integral += error * dt
+        # Clamp integral to prevent windup
+        if self.ki > 0:
+            max_integral = 100.0 / self.ki
+        else:
+            max_integral = 1000.0
+        self.integral = np.clip(self.integral, -max_integral, max_integral)
         i_term = self.ki * self.integral
         
-        # Derivative term
+        # Derivative term (with dt protection)
         d_term = self.kd * (error - self.last_error) / dt
         
         # Total output
         output = p_term + i_term + d_term
+        
+        # Check for NaN before applying limits
+        if not np.isfinite(output):
+            self.integral = 0.0
+            output = 0.0
         
         # Apply output limits
         if self.output_limits[0] is not None:
@@ -428,6 +455,10 @@ class MaridGuidanceTracker(Node):
         
         current_time = self.get_clock().now().nanoseconds / 1e9
         
+        # Check for invalid time (handles timing issues from system lag)
+        if not np.isfinite(current_time) or current_time <= 0:
+            return  # Skip this iteration
+        
         # Get ground velocity (for navigation and airspeed estimation)
         ground_velocity = np.array([
             self.current_odom_.twist.twist.linear.x,
@@ -444,6 +475,10 @@ class MaridGuidanceTracker(Node):
             airspeed = self.estimate_airspeed(ground_velocity)
             if not self.airspeed_received_ and ground_speed > 0.1:
                 self.get_logger().debug(f'Using estimated airspeed: {airspeed:.2f} m/s (ground: {ground_speed:.2f} m/s)')
+        
+        # Check for NaN airspeed
+        if not np.isfinite(airspeed) or airspeed < 0:
+            airspeed = max(0.0, ground_speed)  # Fallback to ground speed
         
         # Wait for guidance to be received before tracking
         # This prevents tracking zero guidance during initialization
@@ -481,8 +516,19 @@ class MaridGuidanceTracker(Node):
         if current_altitude is None:
             current_altitude = self.current_odom_.pose.pose.position.z
         
+        # Check for NaN altitude
+        if not np.isfinite(current_altitude):
+            self.get_logger().debug('Invalid altitude (NaN), using target as fallback')
+            current_altitude = self.target_altitude_  # Use target as fallback
+        
         altitude_error = self.target_altitude_ - current_altitude
         altitude_thrust = self.altitude_pid_.update(altitude_error, current_time)
+        
+        # Check for NaN in PID output
+        if not np.isfinite(altitude_thrust):
+            self.get_logger().debug('Altitude PID returned NaN, resetting')
+            self.altitude_pid_.reset()
+            altitude_thrust = 0.0
         
         # Base thrust from altitude control (should be ~weight when at target altitude)
         base_thrust = altitude_thrust
@@ -525,12 +571,24 @@ class MaridGuidanceTracker(Node):
         # Total thrust = base (altitude) + speed compensation
         # Don't double-count weight - altitude PID handles it
         total_thrust = base_thrust + speed_thrust
+        
+        # Check for NaN before clipping
+        if not np.isfinite(total_thrust):
+            self.get_logger().debug(f'Total thrust is NaN (base: {base_thrust}, speed: {speed_thrust}), using fallback')
+            total_thrust = self.min_thrust_
+        
         total_thrust = np.clip(total_thrust, self.min_thrust_, self.max_thrust_)
         
         # Publish actuator commands
         thrust_msg = Float64()
         thrust_msg.data = float(total_thrust)
         self.total_thrust_pub_.publish(thrust_msg)
+        
+        # Also check yaw_differential for NaN
+        if not np.isfinite(yaw_differential):
+            self.get_logger().debug('Yaw differential is NaN, resetting')
+            self.heading_rate_pid_.reset()
+            yaw_differential = 0.0
         
         yaw_msg = Float64()
         yaw_msg.data = float(yaw_differential)

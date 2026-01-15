@@ -83,7 +83,11 @@ def generate_launch_description():
         "/imu@sensor_msgs/msg/Imu[gz.msgs.IMU",
         "/baro/pressure@sensor_msgs/msg/FluidPressure[gz.msgs.FluidPressure",
         "/gps/fix@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat",
-        "/world/wt/state@gz.msgs.World[gz.msgs.World"
+        "/world/wt/state@gz.msgs.World[gz.msgs.World",
+        # Bridge thruster command topics (ROS2 -> Gazebo Transport)
+        # Note: ] means ROS2 -> Gazebo, [ means Gazebo -> ROS2
+        "/model/marid/joint/thruster_L_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
+        "/model/marid/joint/thruster_R_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
     ],
     output='screen'
     )

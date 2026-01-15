@@ -42,6 +42,7 @@
         <maxVel>0.1</maxVel>
     </gazebo>
 
+
     <gazebo>
         <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
             <link_name>left_wing</link_name>
@@ -57,6 +58,35 @@
             <debug>true</debug>  <!-- ADD DEBUG OUTPUT -->
             <visualize>true</visualize>  <!-- VISUAL FORCES -->
         </plugin>
+    </gazebo> 
+    
+
+    <gazebo>
+        <plugin name="lifting_surface" filename="libLiftDragPlugin.so">
+
+        <!-- taken from the lift curve figure -->
+        <!-- alpha_0 is 5 degrees -->
+        <a0>0.08727</a0>
+        <!-- alpha_stall is 19.3 degrees -->
+        <alpha_stall>0.3368</alpha_stall>
+        <!-- slope of the lift curve to the left of the stall angle -->
+        <cla>5.418</cla>
+        <!-- slope of the lift curve to the right of the stall angle -->
+        <cla_stall>-2.1419</cla_stall>
+
+        <!-- below are just random values in this example -->
+        <cda>0.0</cda>
+        <cda_stall>0.0</cda_stall>
+        <cma>0.0</cma>
+        <cma_stall>0.0</cma_stall>
+        <area>3</area>
+        <fluid_density>1.2041</fluid_density>
+        <forward>-1 0 0</forward>
+        <upward>0 -1 0</upward>
+        <cp>0 0 1</cp>
+        <link_name>lifting_surface_link</link_name>
+        <radial_symmetry>false</radial_symmetry>
+      </plugin>
     </gazebo>
 
     <gazebo>
@@ -142,6 +172,32 @@
             <up>0 0 1</up>
             <cp>0 0 0</cp>  <!-- No offset for tail -->
             <debug>true</debug>
+        </plugin>
+    </gazebo>
+
+    <!-- ===== THRUSTER PLUGINS ===== -->
+    <!-- Left Thruster -->
+    <!-- Gazebo Sim 8 Thruster plugin uses default topic: /model/{namespace}/joint/{joint_name}/cmd_vel -->
+    <gazebo>
+        <plugin filename="libgz-sim8-thruster-system.so" name="gz::sim::systems::Thruster">
+            <namespace>marid</namespace>
+            <joint_name>thruster_L_joint</joint_name>
+            <fluid_density>1.225</fluid_density>  <!-- Air density at sea level (kg/m³) -->
+            <propeller_diameter>0.2</propeller_diameter>  <!-- Adjust based on your propeller size (meters) -->
+            <thrust_coefficient>0.8</thrust_coefficient>  <!-- Typical range: 0.6-1.0 -->
+            <use_angvel_cmd>true</use_angvel_cmd>  <!-- Accept angular velocity commands (rad/s) -->
+        </plugin>
+    </gazebo>
+
+    <!-- Right Thruster -->
+    <gazebo>
+        <plugin filename="libgz-sim8-thruster-system.so" name="gz::sim::systems::Thruster">
+            <namespace>marid</namespace>
+            <joint_name>thruster_R_joint</joint_name>
+            <fluid_density>1.225</fluid_density>
+            <propeller_diameter>0.2</propeller_diameter>
+            <thrust_coefficient>0.8</thrust_coefficient>
+            <use_angvel_cmd>true</use_angvel_cmd>
         </plugin>
     </gazebo>
 

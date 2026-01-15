@@ -34,7 +34,7 @@
     
 
     <wind>
-      <linear_velocity>0.0 1.0 0.0</linear_velocity>
+      <linear_velocity>0.0 0.0 0.0</linear_velocity>
     </wind>
 
 
