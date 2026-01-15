@@ -60,9 +60,9 @@ def generate_launch_description():
 
 
 
-    # Wait for world to load before spawning entity
+    # Timer Action to wait for world spawning
     gz_spawn_entity = TimerAction(
-        period=3.0,  # Wait 3 seconds for world to fully load
+        period=3.0,  # 3 seconds for world to fully load
         actions=[
             Node(
                 package="ros_gz_sim",
@@ -84,7 +84,6 @@ def generate_launch_description():
         "/baro/pressure@sensor_msgs/msg/FluidPressure[gz.msgs.FluidPressure",
         "/gps/fix@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat",
         "/world/wt/state@gz.msgs.World[gz.msgs.World"
-        # Thruster bridge removed - using ApplyLinkWrench plugin directly via gz topic commands
     ],
     output='screen'
     )

@@ -50,12 +50,12 @@ class BarometerConverter(Node):
         
         # Barometric formula for altitude
         try:
-        altitude = (self.T_ / self.L) * (1.0 - math.pow(pressure / self.p0_, 
-                                         (self.R * self.L) / self.g))
+            altitude = (self.T_ / self.L) * (1.0 - math.pow(pressure / self.p0_, 
+                                             (self.R * self.L) / self.g))
             # Validate output
             if math.isnan(altitude) or math.isinf(altitude):
                 return float('nan')
-        return altitude
+            return altitude
         except (ValueError, OverflowError) as e:
             self.get_logger().warn(f'Error calculating altitude from pressure {pressure}: {e}')
             return float('nan')

@@ -126,6 +126,15 @@ def generate_launch_description():
                         'thrust_to_weight_ratio': 2.5,
                         'min_thrust': 0.0,
                         'max_yaw_differential': 0.2,
+                        # Physics-based thrust
+                        'use_physics_thrust': True,
+                        'use_airspeed_sensor': True,
+                        'drag_coefficient': 0.1,  # Tune based on your model
+                        'air_density': 1.225,  # kg/m³ at sea level
+                        # Wind vector (from world file: [0, 1, 0] m/s)
+                        'wind_x': 0.0,
+                        'wind_y': 1.0,
+                        'wind_z': 0.0,
                         # PID gains for tracking guidance targets
                         'speed_kp': 1.0,
                         'speed_ki': 0.05,

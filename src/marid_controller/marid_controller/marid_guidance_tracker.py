@@ -15,12 +15,14 @@ Note: Topic names match what marid_thrust_controller.py expects.
     
 This node implements the PID tracking layer that converts guidance targets
 into actuator commands. It does NOT compute guidance - that's done by marid_ai_guidance.py.
+
+Now includes physics-based thrust calculation with wind compensation.
 """
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64, String
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, FluidPressure
 from geometry_msgs.msg import PoseWithCovarianceStamped
 import numpy as np
 import math
@@ -112,6 +114,8 @@ class MaridGuidanceTracker(Node):
     
     Architecture:
         Guidance Node → Guidance Targets → This Node → Actuator Commands → Thrust Controller
+    
+    Now includes physics-based thrust calculation with wind compensation.
     """
     
     def __init__(self):
@@ -139,13 +143,37 @@ class MaridGuidanceTracker(Node):
         self.declare_parameter('altitude_kp', 2.0)
         self.declare_parameter('altitude_ki', 0.1)
         self.declare_parameter('altitude_kd', 0.5)
-        self.declare_parameter('target_altitude', 8000.0)
+        self.declare_parameter('target_altitude', 5.0)  # Default to 5m (will be overridden by launch file)
+        
+        # Physics-based thrust parameters
+        self.declare_parameter('drag_coefficient', 0.1)  # Cd * A * rho / 2 (simplified drag model)
+        self.declare_parameter('use_physics_thrust', True)  # Enable physics-based calculation
+        self.declare_parameter('use_airspeed_sensor', True)  # Use airspeed sensor if available
+        
+        # Wind vector (from world file: [0, 1, 0] m/s = 1 m/s in Y direction)
+        self.declare_parameter('wind_x', 0.0)  # m/s
+        self.declare_parameter('wind_y', 1.0)  # m/s
+        self.declare_parameter('wind_z', 0.0)  # m/s
+        
+        # Air density (kg/m³) - standard sea level
+        self.declare_parameter('air_density', 1.225)  # kg/m³ at sea level
         
         # Get parameters
         self.update_rate_ = self.get_parameter('update_rate').value
         self.thrust_to_weight_ratio_ = self.get_parameter('thrust_to_weight_ratio').value
         self.min_thrust_ = self.get_parameter('min_thrust').value
         self.max_yaw_differential_ = self.get_parameter('max_yaw_differential').value
+        self.use_physics_thrust_ = self.get_parameter('use_physics_thrust').value
+        self.use_airspeed_sensor_ = self.get_parameter('use_airspeed_sensor').value
+        self.drag_coeff_ = self.get_parameter('drag_coefficient').value
+        self.air_density_ = self.get_parameter('air_density').value
+        
+        # Wind vector
+        self.wind_vector_ = np.array([
+            self.get_parameter('wind_x').value,
+            self.get_parameter('wind_y').value,
+            self.get_parameter('wind_z').value
+        ])
         
         # Calculate max_thrust
         max_thrust_param = self.get_parameter('max_thrust').value
@@ -154,6 +182,7 @@ class MaridGuidanceTracker(Node):
         if max_thrust_param is None or base_thrust_override is not None:
             aircraft_mass = self.get_aircraft_mass()
             if aircraft_mass is not None:
+                self.aircraft_mass_ = aircraft_mass
                 if base_thrust_override is not None:
                     self.max_thrust_ = float(base_thrust_override)
                 else:
@@ -162,15 +191,21 @@ class MaridGuidanceTracker(Node):
                     self.max_thrust_ = weight * self.thrust_to_weight_ratio_
                 self.get_logger().info(f'Aircraft mass: {aircraft_mass:.2f} kg, max_thrust: {self.max_thrust_:.2f} N')
             else:
+                self.aircraft_mass_ = 10.0  # Default fallback
                 self.max_thrust_ = 200.0 if max_thrust_param is None else float(max_thrust_param)
                 self.get_logger().warn(f'Could not determine mass, using default max_thrust: {self.max_thrust_:.2f} N')
         else:
             self.max_thrust_ = float(max_thrust_param)
+            # Estimate mass from max_thrust
+            g = 9.81
+            self.aircraft_mass_ = (self.max_thrust_ / self.thrust_to_weight_ratio_) / g
         
         # Current state
         self.current_odom_ = None
         self.current_imu_ = None
         self.current_altitude_ = None
+        self.current_airspeed_ = None  # From pitot sensor
+        self.airspeed_received_ = False
         
         # Guidance targets (from guidance node)
         self.desired_heading_rate_ = 0.0
@@ -225,6 +260,18 @@ class MaridGuidanceTracker(Node):
             10
         )
         
+        # Subscribe to airspeed sensor (if available)
+        if self.use_airspeed_sensor_:
+            self.airspeed_sub_ = self.create_subscription(
+                FluidPressure,
+                '/airspeed',
+                self.airspeed_callback,
+                10
+            )
+            self.get_logger().info('Subscribed to /airspeed for wind compensation')
+        else:
+            self.get_logger().info('Airspeed sensor disabled - will estimate from ground velocity and wind')
+        
         # Subscribe to GUIDANCE TARGETS (from guidance node)
         self.desired_heading_rate_sub_ = self.create_subscription(
             Float64,
@@ -266,6 +313,10 @@ class MaridGuidanceTracker(Node):
         
         self.get_logger().info('MARID Guidance Tracker initialized (Option A architecture)')
         self.get_logger().info(f'  Max thrust: {self.max_thrust_:.2f} N')
+        self.get_logger().info(f'  Aircraft mass: {self.aircraft_mass_:.2f} kg')
+        self.get_logger().info(f'  Wind vector: [{self.wind_vector_[0]:.2f}, {self.wind_vector_[1]:.2f}, {self.wind_vector_[2]:.2f}] m/s')
+        self.get_logger().info(f'  Drag coefficient: {self.drag_coeff_:.4f}')
+        self.get_logger().info(f'  Physics-based thrust: {"enabled" if self.use_physics_thrust_ else "disabled"}')
         self.get_logger().info(f'  Subscribes to guidance targets from /marid/guidance/*')
         self.get_logger().info(f'  Publishes actuator commands to /marid/thrust/*')
     
@@ -306,6 +357,40 @@ class MaridGuidanceTracker(Node):
         """Store current altitude"""
         self.current_altitude_ = msg.pose.pose.position.z
     
+    def airspeed_callback(self, msg):
+        """
+        Store current airspeed from pitot sensor.
+        Airspeed sensor publishes pressure differential (Pa).
+        Convert to velocity: v = sqrt(2 * delta_p / rho)
+        """
+        try:
+            # Pressure differential in Pascals
+            # Static pressure is typically ~101325 Pa at sea level
+            # Dynamic pressure = 0.5 * rho * v²
+            # So: delta_p = 0.5 * rho * v² → v = sqrt(2 * delta_p / rho)
+            pressure_diff = msg.fluid_pressure  # Pa (dynamic pressure)
+            
+            if pressure_diff > 0:
+                # Convert pressure to velocity
+                airspeed = math.sqrt(2.0 * pressure_diff / self.air_density_)
+                self.current_airspeed_ = airspeed
+                self.airspeed_received_ = True
+            else:
+                # Negative or zero pressure - likely stationary or sensor error
+                self.current_airspeed_ = 0.0
+        except Exception as e:
+            self.get_logger().debug(f'Error processing airspeed: {e}')
+            self.current_airspeed_ = None
+    
+    def estimate_airspeed(self, ground_velocity):
+        """
+        Estimate airspeed from ground velocity and wind vector.
+        airspeed_vector = ground_velocity - wind_vector
+        airspeed = ||airspeed_vector||
+        """
+        airspeed_vector = ground_velocity - self.wind_vector_
+        return np.linalg.norm(airspeed_vector)
+    
     def desired_heading_rate_callback(self, msg):
         """Store desired heading rate from guidance node"""
         self.desired_heading_rate_ = msg.data
@@ -337,9 +422,28 @@ class MaridGuidanceTracker(Node):
         self.guidance_mode_ = msg.data
     
     def control_loop(self):
-        """Main control loop - tracks guidance targets and outputs actuator commands"""
+        """Main control loop - tracks guidance targets and outputs actuator commands with physics-based thrust"""
         if self.current_odom_ is None:
             return
+        
+        current_time = self.get_clock().now().nanoseconds / 1e9
+        
+        # Get ground velocity (for navigation and airspeed estimation)
+        ground_velocity = np.array([
+            self.current_odom_.twist.twist.linear.x,
+            self.current_odom_.twist.twist.linear.y,
+            self.current_odom_.twist.twist.linear.z
+        ])
+        ground_speed = np.linalg.norm(ground_velocity)
+        
+        # Get airspeed (for aerodynamics and drag calculation)
+        if self.use_airspeed_sensor_ and self.airspeed_received_ and self.current_airspeed_ is not None:
+            airspeed = self.current_airspeed_
+        else:
+            # Estimate airspeed from ground velocity and wind
+            airspeed = self.estimate_airspeed(ground_velocity)
+            if not self.airspeed_received_ and ground_speed > 0.1:
+                self.get_logger().debug(f'Using estimated airspeed: {airspeed:.2f} m/s (ground: {ground_speed:.2f} m/s)')
         
         # Wait for guidance to be received before tracking
         # This prevents tracking zero guidance during initialization
@@ -348,54 +452,79 @@ class MaridGuidanceTracker(Node):
             # Don't track speed/heading until guidance is active
             self.get_logger().debug('Waiting for guidance targets... Using altitude-only control.')
             
-            # Only maintain altitude (prevent falling during startup)
-            if current_altitude is not None:
-                altitude_error = self.target_altitude_ - current_altitude
-                altitude_thrust = self.altitude_pid_.update(altitude_error, current_time)
-                altitude_thrust = np.clip(altitude_thrust, self.min_thrust_, self.max_thrust_)
-                
-                # Publish altitude-only thrust (no yaw command)
-                thrust_msg = Float64()
-                thrust_msg.data = float(altitude_thrust)
-                self.total_thrust_pub_.publish(thrust_msg)
-                
-                yaw_msg = Float64()
-                yaw_msg.data = 0.0  # No yaw command during initialization
-                self.yaw_differential_pub_.publish(yaw_msg)
+            # Use odometry altitude as fallback if barometer not available
+            current_altitude = self.current_altitude_
+            if current_altitude is None:
+                current_altitude = self.current_odom_.pose.pose.position.z
+            
+            # Maintain altitude (prevent falling during startup)
+            altitude_error = self.target_altitude_ - current_altitude
+            altitude_thrust = self.altitude_pid_.update(altitude_error, current_time)
+            altitude_thrust = np.clip(altitude_thrust, self.min_thrust_, self.max_thrust_)
+            
+            # Publish altitude-only thrust (no yaw command)
+            thrust_msg = Float64()
+            thrust_msg.data = float(altitude_thrust)
+            self.total_thrust_pub_.publish(thrust_msg)
+            
+            yaw_msg = Float64()
+            yaw_msg.data = 0.0  # No yaw command during initialization
+            self.yaw_differential_pub_.publish(yaw_msg)
             return
         
-        current_time = self.get_clock().now().nanoseconds / 1e9
+        # ===== PHYSICS-BASED THRUST CALCULATION =====
+        g = 9.81
+        weight = self.aircraft_mass_ * g
         
-        # Get current state
-        current_velocity = math.sqrt(
-            self.current_odom_.twist.twist.linear.x**2 +
-            self.current_odom_.twist.twist.linear.y**2 +
-            self.current_odom_.twist.twist.linear.z**2
-        )
-        
-        current_yaw_rate = 0.0
-        if self.current_imu_ is not None:
-            current_yaw_rate = self.current_imu_.angular_velocity.z
-        
+        # Maintain altitude first (provides base thrust)
         current_altitude = self.current_altitude_
         if current_altitude is None:
             current_altitude = self.current_odom_.pose.pose.position.z
         
-        # Track speed target (guidance provides desired_speed)
-        speed_error = self.desired_speed_ - current_velocity
-        speed_thrust = self.speed_pid_.update(speed_error, current_time)
+        altitude_error = self.target_altitude_ - current_altitude
+        altitude_thrust = self.altitude_pid_.update(altitude_error, current_time)
+        
+        # Base thrust from altitude control (should be ~weight when at target altitude)
+        base_thrust = altitude_thrust
+        
+        if self.use_physics_thrust_:
+            # Drag force = drag_coefficient * airspeed²
+            # drag_coefficient = 0.5 * rho * Cd * A (pre-computed parameter)
+            current_drag = self.drag_coeff_ * airspeed**2
+            
+            # Desired airspeed (simplified - could account for wind)
+            desired_airspeed = self.desired_speed_
+            desired_drag = self.drag_coeff_ * desired_airspeed**2
+            
+            # Drag compensation: add thrust to overcome drag at desired speed
+            # Only add the difference between desired and current drag
+            drag_compensation = desired_drag - current_drag
+            
+            # PID correction for airspeed error (fine-tuning)
+            airspeed_error = desired_airspeed - airspeed
+            speed_correction = self.speed_pid_.update(airspeed_error, current_time)
+            
+            # Speed-related thrust = drag compensation + PID correction
+            # Scale down PID correction to avoid over-correction
+            speed_thrust = drag_compensation + 0.3 * speed_correction
+            
+        else:
+            # Original PID-only approach (reactive, no physics)
+            speed_error = self.desired_speed_ - ground_speed
+            speed_thrust = self.speed_pid_.update(speed_error, current_time)
         
         # Track heading rate target (guidance provides desired_heading_rate)
+        current_yaw_rate = 0.0
+        if self.current_imu_ is not None:
+            current_yaw_rate = self.current_imu_.angular_velocity.z
+        
         heading_rate_error = self.desired_heading_rate_ - current_yaw_rate
         yaw_differential = self.heading_rate_pid_.update(heading_rate_error, current_time)
         yaw_differential = np.clip(yaw_differential, -self.max_yaw_differential_, self.max_yaw_differential_)
         
-        # Maintain altitude (independent control, doesn't come from guidance yet)
-        altitude_error = self.target_altitude_ - current_altitude
-        altitude_thrust = self.altitude_pid_.update(altitude_error, current_time)
-        
-        # Total thrust combines speed tracking and altitude maintenance
-        total_thrust = speed_thrust + altitude_thrust
+        # Total thrust = base (altitude) + speed compensation
+        # Don't double-count weight - altitude PID handles it
+        total_thrust = base_thrust + speed_thrust
         total_thrust = np.clip(total_thrust, self.min_thrust_, self.max_thrust_)
         
         # Publish actuator commands
@@ -406,6 +535,17 @@ class MaridGuidanceTracker(Node):
         yaw_msg = Float64()
         yaw_msg.data = float(yaw_differential)
         self.yaw_differential_pub_.publish(yaw_msg)
+        
+        # Debug logging (periodic)
+        if not hasattr(self, '_debug_counter'):
+            self._debug_counter = 0
+        self._debug_counter += 1
+        if self._debug_counter % 50 == 0:  # Every 1 second at 50 Hz
+            self.get_logger().debug(
+                f'Thrust: {total_thrust:.2f}N (speed: {speed_thrust:.2f}N, alt: {altitude_thrust:.2f}N) | '
+                f'Airspeed: {airspeed:.2f} m/s (desired: {self.desired_speed_:.2f} m/s) | '
+                f'Ground speed: {ground_speed:.2f} m/s | Yaw diff: {yaw_differential:.3f}'
+            )
     
     def set_target_altitude(self, altitude):
         """Update target altitude (can be called from waypoint updates)"""
