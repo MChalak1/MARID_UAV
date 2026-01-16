@@ -59,35 +59,6 @@
             <visualize>true</visualize>  <!-- VISUAL FORCES -->
         </plugin>
     </gazebo> 
-    
-
-    <gazebo>
-        <plugin name="lifting_surface" filename="libLiftDragPlugin.so">
-
-        <!-- taken from the lift curve figure -->
-        <!-- alpha_0 is 5 degrees -->
-        <a0>0.08727</a0>
-        <!-- alpha_stall is 19.3 degrees -->
-        <alpha_stall>0.3368</alpha_stall>
-        <!-- slope of the lift curve to the left of the stall angle -->
-        <cla>5.418</cla>
-        <!-- slope of the lift curve to the right of the stall angle -->
-        <cla_stall>-2.1419</cla_stall>
-
-        <!-- below are just random values in this example -->
-        <cda>0.0</cda>
-        <cda_stall>0.0</cda_stall>
-        <cma>0.0</cma>
-        <cma_stall>0.0</cma_stall>
-        <area>3</area>
-        <fluid_density>1.2041</fluid_density>
-        <forward>-1 0 0</forward>
-        <upward>0 -1 0</upward>
-        <cp>0 0 1</cp>
-        <link_name>lifting_surface_link</link_name>
-        <radial_symmetry>false</radial_symmetry>
-      </plugin>
-    </gazebo>
 
     <gazebo>
         <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
@@ -159,7 +130,7 @@
         </plugin>
     </gazebo>
 
-    <gazebo>
+    <gazebo reference="main_tail">
         <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
             <link_name>main_tail</link_name>
             <air_density>1.225</air_density>
@@ -198,6 +169,59 @@
             <propeller_diameter>0.2</propeller_diameter>
             <thrust_coefficient>0.8</thrust_coefficient>
             <use_angvel_cmd>true</use_angvel_cmd>
+        </plugin>
+    </gazebo>
+
+    <!-- Center Thruster (for single-thruster testing) -->
+    <gazebo>
+        <plugin filename="libgz-sim8-thruster-system.so" name="gz::sim::systems::Thruster">
+            <namespace>marid</namespace>
+            <joint_name>thruster_center_joint</joint_name>
+            <fluid_density>1.225</fluid_density>
+            <propeller_diameter>0.2</propeller_diameter>
+            <thrust_coefficient>0.8</thrust_coefficient>
+            <use_angvel_cmd>true</use_angvel_cmd>
+        </plugin>
+    </gazebo>
+
+    <!-- ===== JOINT POSITION CONTROLLERS FOR CONTROL SURFACES ===== -->
+    <!-- Left Wing Position Controller -->
+    <gazebo>
+        <plugin filename="libgz-sim8-joint-position-controller-system.so" 
+                name="gz::sim::systems::JointPositionController">
+            <joint_name>left_wing_joint</joint_name>
+            <p_gain>0.5</p_gain>  <!-- Increased from 0.1 for faster control surface response -->
+            <topic>/model/marid/joint/left_wing_joint/cmd_pos</topic>
+        </plugin>
+    </gazebo>
+
+    <!-- Right Wing Position Controller -->
+    <gazebo>
+        <plugin filename="libgz-sim8-joint-position-controller-system.so" 
+                name="gz::sim::systems::JointPositionController">
+            <joint_name>right_wing_joint</joint_name>
+            <p_gain>0.5</p_gain>  <!-- Increased from 0.1 for faster control surface response -->
+            <topic>/model/marid/joint/right_wing_joint/cmd_pos</topic>
+        </plugin>
+    </gazebo>
+
+    <!-- Left Tail Position Controller -->
+    <gazebo>
+        <plugin filename="libgz-sim8-joint-position-controller-system.so" 
+                name="gz::sim::systems::JointPositionController">
+            <joint_name>tail_left_joint</joint_name>
+            <p_gain>0.5</p_gain>  <!-- Increased from 0.1 for faster control surface response -->
+            <topic>/model/marid/joint/tail_left_joint/cmd_pos</topic>
+        </plugin>
+    </gazebo>
+
+    <!-- Right Tail Position Controller -->
+    <gazebo>
+        <plugin filename="libgz-sim8-joint-position-controller-system.so" 
+                name="gz::sim::systems::JointPositionController">
+            <joint_name>tail_right_joint</joint_name>
+            <p_gain>0.5</p_gain>  <!-- Increased from 0.1 for faster control surface response -->
+            <topic>/model/marid/joint/tail_right_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
 

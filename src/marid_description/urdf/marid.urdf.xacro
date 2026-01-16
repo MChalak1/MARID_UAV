@@ -29,8 +29,8 @@
   <link name="base_link_front">  
     <inertial>
       <mass value="3.0903248"/> 
-      <origin xyz="0 0.1 0.02" rpy="0 0 0"/>
-      <inertia ixx="0.1110930358" ixy="0.0" ixz="0.0" iyy="0.0247075659" iyz="0.0027559088" izz="0.1288539854"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>  <!-- Fixed: COM at geometric center for stability -->
+      <inertia ixx="0.1110930358" ixy="0.0" ixz="0.0" iyy="0.0247075659" iyz="0.0" izz="0.1288539854"/>  <!-- Fixed: Zeroed iyz to eliminate cross-coupling moments -->
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -343,8 +343,8 @@
   <joint name="thruster_L_joint" type="revolute">
     <parent link="base_link_front"/>
     <child  link="thruster_L"/>
-    <origin xyz="-0.30  0.20 -0.05" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>  <!-- Rotate around Y-axis (forward direction) -->
+    <origin xyz="-0.15 0.0 -0.02" rpy="0 0 0"/>  <!-- Fixed: Moved closer to COM to reduce moments -->
+    <axis xyz="0 1 0"/>  <!-- Reverted: Original axis was correct -->
     <limit lower="-3.14159" upper="3.14159" effort="100" velocity="100"/>
     <dynamics damping="0.01" friction="0.0"/>
   </joint>
@@ -352,8 +352,34 @@
   <joint name="thruster_R_joint" type="revolute">
     <parent link="base_link_front"/>
     <child  link="thruster_R"/>
-    <origin xyz="0.30 0.20 -0.05" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>  <!-- Rotate around Y-axis (forward direction) -->
+    <origin xyz="0.15 0.0 -0.02" rpy="0 0 0"/>  <!-- Fixed: Moved closer to COM to reduce moments -->
+    <axis xyz="0 1 0"/>  <!-- Reverted: Original axis was correct -->
+    <limit lower="-3.14159" upper="3.14159" effort="100" velocity="100"/>
+    <dynamics damping="0.01" friction="0.0"/>
+  </joint>
+
+  <!-- Center Thruster (for single-thruster testing) -->
+  <link name="thruster_center">
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder length="0.1" radius="0.015"/></geometry>
+      <material name="green_thruster">
+        <color rgba="0.0 1.0 0.0 1.0"/>
+      </material>
+    </visual>
+    <collision><origin xyz="0 0 0" rpy="1.5708 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
+  </link>
+
+  <joint name="thruster_center_joint" type="revolute">
+    <parent link="base_link_front"/>
+    <child link="thruster_center"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>  <!-- At COM - no moments -->
+    <axis xyz="0 1 0"/>
     <limit lower="-3.14159" upper="3.14159" effort="100" velocity="100"/>
     <dynamics damping="0.01" friction="0.0"/>
   </joint>

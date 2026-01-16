@@ -59,7 +59,7 @@ def generate_launch_description():
             parameters=[{
                 'initial_thrust': 0.0,
                 'min_thrust': 0.0,
-                'thrust_to_weight_ratio': 2.5,
+                'thrust_to_weight_ratio': 0.65,  # Reduced from 2.5: gives max thrust ~1.3x weight (reasonable for aircraft)
                 'thrust_increment': 1.0,
                 'world_name': 'wt',
                 'model_name': 'marid',
@@ -69,6 +69,7 @@ def generate_launch_description():
                 'enable_differential': True,  # Enable differential for yaw control
                 'thrust_to_angvel_gain': 50.0,  # Conversion factor: omega = gain * sqrt(thrust)
                 'use_thruster_plugin': True,  # Use Gazebo Thruster plugin (True) or legacy wrench (False)
+                'use_center_thruster': True,  # Use single center thruster (True) or dual left/right (False) - set to True for testing
                 'use_sim_time': True,
             }]
         ),
@@ -125,7 +126,7 @@ def generate_launch_description():
                     parameters=[{
                         'update_rate': 50.0,
                         # Thrust parameters
-                        'thrust_to_weight_ratio': 2.5,
+                        'thrust_to_weight_ratio': 0.65,  # Reduced from 2.5: gives max thrust ~1.3x weight (reasonable for aircraft)
                         'min_thrust': 0.0,
                         'max_yaw_differential': 0.2,
                         # Physics-based thrust
@@ -137,17 +138,17 @@ def generate_launch_description():
                         'wind_x': 0.0,
                         'wind_y': 0.0,
                         'wind_z': 0.0,
-                        # PID gains for tracking guidance targets
-                        'speed_kp': 1.0,
+                        # PID gains for tracking guidance targets (reduced for stability)
+                        'speed_kp': 0.5,  # Reduced from 1.0
                         'speed_ki': 0.05,
                         'speed_kd': 0.3,
                         'heading_rate_kp': 1.0,
                         'heading_rate_ki': 0.1,
                         'heading_rate_kd': 0.3,
-                        # Altitude control
-                        'altitude_kp': 2.0,
+                        # Altitude control (reduced gains for stability)
+                        'altitude_kp': 1.0,  # Reduced from 2.0
                         'altitude_ki': 0.1,
-                        'altitude_kd': 0.5,
+                        'altitude_kd': 0.8,  # Increased damping from 0.5
                         'target_altitude': 5.0,  # m
                         'use_sim_time': True,
                     }]
@@ -167,16 +168,16 @@ def generate_launch_description():
                     output='screen',
                     parameters=[{
                         'update_rate': 50.0,
-                        # PID gains
-                        'roll_kp': 1.0,
+                        # PID gains (reduced P, increased D for better damping)
+                        'roll_kp': 0.5,  # Reduced from 1.0
                         'roll_ki': 0.0,
-                        'roll_kd': 0.3,
-                        'pitch_kp': 1.5,
+                        'roll_kd': 0.8,  # Increased from 0.3 for better damping
+                        'pitch_kp': 0.8,  # Reduced from 1.5
                         'pitch_ki': 0.0,
-                        'pitch_kd': 0.5,
-                        'yaw_kp': 1.0,
+                        'pitch_kd': 1.0,  # Increased from 0.5 for better damping
+                        'yaw_kp': 0.5,  # Reduced from 1.0
                         'yaw_ki': 0.0,
-                        'yaw_kd': 0.3,
+                        'yaw_kd': 0.8,  # Increased from 0.3 for better damping
                         # Control surface limits
                         'wing_max_deflection': 0.5,
                         'tail_max_deflection': 0.5,

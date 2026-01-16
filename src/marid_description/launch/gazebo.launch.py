@@ -88,6 +88,13 @@ def generate_launch_description():
         # Note: ] means ROS2 -> Gazebo, [ means Gazebo -> ROS2
         "/model/marid/joint/thruster_L_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
         "/model/marid/joint/thruster_R_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
+        "/model/marid/joint/thruster_center_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
+        # Bridge wing and tail joint command topics (ROS2 -> Gazebo Transport)
+        # Using custom topic names without /0/ to be ROS2-compatible
+        "/model/marid/joint/left_wing_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
+        "/model/marid/joint/right_wing_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
+        "/model/marid/joint/tail_left_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
+        "/model/marid/joint/tail_right_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
     ],
     output='screen'
     )

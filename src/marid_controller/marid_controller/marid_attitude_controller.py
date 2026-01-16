@@ -9,7 +9,7 @@ from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64
 import numpy as np
 import math
 from tf_transformations import euler_from_quaternion
@@ -194,11 +194,26 @@ class MaridAttitudeController(Node):
             10
         )
         
-        # Publisher for joint commands
-        # ROS2 control uses Float64MultiArray for joint group position controller
-        self.joint_cmd_pub_ = self.create_publisher(
-            Float64MultiArray,
-            '/simple_position_controller/commands',
+        # Publishers for individual joint commands (ROS2 -> Gazebo Transport via bridge)
+        # Using custom topic names without /0/ to be ROS2-compatible
+        self.left_wing_pub_ = self.create_publisher(
+            Float64,
+            '/model/marid/joint/left_wing_joint/cmd_pos',
+            10
+        )
+        self.right_wing_pub_ = self.create_publisher(
+            Float64,
+            '/model/marid/joint/right_wing_joint/cmd_pos',
+            10
+        )
+        self.tail_left_pub_ = self.create_publisher(
+            Float64,
+            '/model/marid/joint/tail_left_joint/cmd_pos',
+            10
+        )
+        self.tail_right_pub_ = self.create_publisher(
+            Float64,
+            '/model/marid/joint/tail_right_joint/cmd_pos',
             10
         )
         
@@ -206,16 +221,9 @@ class MaridAttitudeController(Node):
         timer_period = 1.0 / self.update_rate_
         self.control_timer_ = self.create_timer(timer_period, self.control_loop)
         
-        # Joint order (must match marid_controllers.yaml)
-        self.joint_names_ = [
-            'left_wing_joint',
-            'right_wing_joint',
-            'tail_left_joint',
-            'tail_right_joint'
-        ]
-        
         self.get_logger().info('MARID Attitude Controller initialized')
         self.get_logger().info(f'Update rate: {self.update_rate_} Hz')
+        self.get_logger().info('Publishing to Gazebo joint command topics (bridged)')
         if self.destination_ is not None:
             self.get_logger().info(f'Waypoint navigation enabled')
     
@@ -245,15 +253,20 @@ class MaridAttitudeController(Node):
         q = msg.pose.pose.orientation
         roll, pitch, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
         
-        self.current_roll_ = roll
-        self.current_pitch_ = pitch
+        # SWAP ROLL AND PITCH: Drone faces Y-axis (not X), so:
+        # - Gazebo's "pitch" (Y-axis rotation) = drone's "roll" (rotation around forward axis)
+        # - Gazebo's "roll" (X-axis rotation) = drone's "pitch" (rotation around lateral axis)
+        self.current_roll_ = pitch   # What Gazebo calls "pitch" is actually "roll" for Y-forward
+        self.current_pitch_ = roll    # What Gazebo calls "roll" is actually "pitch" for Y-forward
         self.current_yaw_ = yaw
     
     def imu_callback(self, msg):
         """Extract angular rates from IMU"""
         self.current_imu_ = msg
-        self.current_roll_rate_ = msg.angular_velocity.x
-        self.current_pitch_rate_ = msg.angular_velocity.y
+        # SWAP ROLL_RATE AND PITCH_RATE: Match the swapped roll/pitch orientation
+        # For Y-forward: Y angular velocity = roll rate, X angular velocity = pitch rate
+        self.current_roll_rate_ = msg.angular_velocity.y   # Y angular velocity = roll rate for Y-forward
+        self.current_pitch_rate_ = msg.angular_velocity.x   # X angular velocity = pitch rate for Y-forward
         self.current_yaw_rate_ = msg.angular_velocity.z
     
     def waypoint_callback(self, msg):
@@ -356,16 +369,22 @@ class MaridAttitudeController(Node):
         left_tail_deflection = np.clip(left_tail_deflection, -tail_max, tail_max)
         right_tail_deflection = np.clip(right_tail_deflection, -tail_max, tail_max)
         
-        # Publish joint commands
-        joint_cmd = Float64MultiArray()
-        joint_cmd.data = [
-            float(left_wing_deflection),
-            float(right_wing_deflection),
-            float(left_tail_deflection),
-            float(right_tail_deflection)
-        ]
+        # Publish individual joint commands (will be bridged to Gazebo Transport)
+        left_wing_msg = Float64()
+        left_wing_msg.data = float(left_wing_deflection)
+        self.left_wing_pub_.publish(left_wing_msg)
         
-        self.joint_cmd_pub_.publish(joint_cmd)
+        right_wing_msg = Float64()
+        right_wing_msg.data = float(right_wing_deflection)
+        self.right_wing_pub_.publish(right_wing_msg)
+        
+        tail_left_msg = Float64()
+        tail_left_msg.data = float(left_tail_deflection)
+        self.tail_left_pub_.publish(tail_left_msg)
+        
+        tail_right_msg = Float64()
+        tail_right_msg.data = float(right_tail_deflection)
+        self.tail_right_pub_.publish(tail_right_msg)
         
         # Log periodically (every 2 seconds)
         if int(current_time * 10) % 100 == 0:  # Every 2 seconds at 50Hz

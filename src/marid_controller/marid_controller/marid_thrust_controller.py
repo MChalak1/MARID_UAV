@@ -80,6 +80,9 @@ class MaridThrustController(Node):
         self.declare_parameter('enable_differential', False)  # Enable differential thrust for yaw control
         self.declare_parameter('thrust_to_angvel_gain', 50.0)  # Conversion factor: omega = gain * sqrt(thrust)
         self.declare_parameter('use_thruster_plugin', True)    # Use Gazebo Thruster plugin (True) or legacy wrench (False)
+        self.declare_parameter('use_center_thruster', False)   # Use single center thruster (True) or dual left/right (False)
+        self.declare_parameter('thrust_rate_limit', 50.0)       # Max change rate (N/s) for smooth transitions
+        self.declare_parameter('thrust_smoothing_factor', 0.1)  # Exponential smoothing: 0.0 = no smoothing, 1.0 = full smoothing
         
         self.initial_thrust_ = self.get_parameter('initial_thrust').value
         self.min_thrust_ = self.get_parameter('min_thrust').value
@@ -115,11 +118,24 @@ class MaridThrustController(Node):
         self.enable_differential_ = self.get_parameter('enable_differential').value
         self.thrust_to_angvel_gain_ = self.get_parameter('thrust_to_angvel_gain').value
         self.use_thruster_plugin_ = self.get_parameter('use_thruster_plugin').value
+        self.use_center_thruster_ = self.get_parameter('use_center_thruster').value
+        self.thrust_rate_limit_ = self.get_parameter('thrust_rate_limit').value
+        self.thrust_smoothing_factor_ = self.get_parameter('thrust_smoothing_factor').value
         
         # Current thrust values in Newtons (absolute, not ratio)
         self.current_thrust_ = self.initial_thrust_
         self.left_thrust_ = self.initial_thrust_
         self.right_thrust_ = self.initial_thrust_
+        
+        # Target thrust values (what we want to achieve)
+        self.target_left_thrust_ = self.initial_thrust_
+        self.target_right_thrust_ = self.initial_thrust_
+        self.target_center_thrust_ = self.initial_thrust_  # For center thruster mode
+        
+        # Last published values (for rate limiting and smoothing)
+        self.last_published_left_ = self.initial_thrust_
+        self.last_published_right_ = self.initial_thrust_
+        self.last_published_center_ = self.initial_thrust_  # For center thruster mode
         
         # Lock for thread-safe access to thrust values
         self.thrust_lock_ = threading.Lock()
@@ -131,18 +147,29 @@ class MaridThrustController(Node):
         # Note: Gazebo Sim 8 Thruster plugin uses default topic pattern:
         # /model/{namespace}/joint/{joint_name}/cmd_vel (when use_angvel_cmd=true)
         if self.use_thruster_plugin_:
-            self.left_thruster_cmd_pub_ = self.create_publisher(
-                Float64,
-                '/model/marid/joint/thruster_L_joint/cmd_vel',
-                10
-            )
-            self.right_thruster_cmd_pub_ = self.create_publisher(
-                Float64,
-                '/model/marid/joint/thruster_R_joint/cmd_vel',
-                10
-            )
-            self.get_logger().info('Using Gazebo Thruster plugin (angular velocity commands)')
-            self.get_logger().info('Publishing to: /model/marid/joint/thruster_L_joint/cmd_vel and /model/marid/joint/thruster_R_joint/cmd_vel')
+            if self.use_center_thruster_:
+                # Single center thruster mode
+                self.center_thruster_cmd_pub_ = self.create_publisher(
+                    Float64,
+                    '/model/marid/joint/thruster_center_joint/cmd_vel',
+                    10
+                )
+                self.get_logger().info('Using Gazebo Thruster plugin - CENTER THRUSTER MODE (single thruster at COM)')
+                self.get_logger().info('Publishing to: /model/marid/joint/thruster_center_joint/cmd_vel')
+            else:
+                # Dual thruster mode (left/right)
+                self.left_thruster_cmd_pub_ = self.create_publisher(
+                    Float64,
+                    '/model/marid/joint/thruster_L_joint/cmd_vel',
+                    10
+                )
+                self.right_thruster_cmd_pub_ = self.create_publisher(
+                    Float64,
+                    '/model/marid/joint/thruster_R_joint/cmd_vel',
+                    10
+                )
+                self.get_logger().info('Using Gazebo Thruster plugin - DUAL THRUSTER MODE (left/right)')
+                self.get_logger().info('Publishing to: /model/marid/joint/thruster_L_joint/cmd_vel and /model/marid/joint/thruster_R_joint/cmd_vel')
         else:
             # Legacy: Use ApplyLinkWrench plugin (in world) via direct gz topic publishing
             # Use persistent topic (applies continuously until cleared or updated)
@@ -220,12 +247,15 @@ class MaridThrustController(Node):
         
         self.get_logger().info('MARID Thrust Controller initialized (Service-based)')
         self.get_logger().info(f'World: {self.world_name_}, Model: {self.model_name_}, Link: {self.link_name_}')
-        self.get_logger().info(f'Initial thrust: {self.initial_thrust_:.2f} N per thruster')
+        self.get_logger().info(f'Thruster mode: {"CENTER (single)" if self.use_center_thruster_ else "DUAL (left/right)"}')
+        self.get_logger().info(f'Initial thrust: {self.initial_thrust_:.2f} N {"(center)" if self.use_center_thruster_ else "per thruster"}')
         self.get_logger().info(f'Thrust range: {self.min_thrust_:.2f} - {self.max_thrust_:.2f} N')
         self.get_logger().info(f'Thrust increment: {self.thrust_increment_:.2f} N per keypress')
         if self.enable_keyboard_ and PYNPUT_AVAILABLE:
             self.get_logger().info('Keyboard control: UP arrow = +1N, DOWN arrow = -1N')
         self.get_logger().info(f'Differential thrust: {"enabled" if self.enable_differential_ else "disabled"}')
+        self.get_logger().info(f'Thrust rate limit: {self.thrust_rate_limit_:.1f} N/s')
+        self.get_logger().info(f'Thrust smoothing factor: {self.thrust_smoothing_factor_:.2f}')
         if self.use_thruster_plugin_:
             self.get_logger().info(f'Thrust-to-angular-velocity gain: {self.thrust_to_angvel_gain_:.2f}')
             self.get_logger().info('Publishing angular velocity commands to Gazebo Thruster plugins')
@@ -260,28 +290,30 @@ class MaridThrustController(Node):
         self.get_logger().info('Keyboard listener started')
     
     def increment_thrust(self):
-        """Increment thrust by thrust_increment_"""
+        """Increment thrust target by thrust_increment_"""
         with self.thrust_lock_:
             new_thrust = min(self.current_thrust_ + self.thrust_increment_, self.max_thrust_)
             if new_thrust != self.current_thrust_:
                 self.current_thrust_ = new_thrust
-                self.left_thrust_ = new_thrust
-                self.right_thrust_ = new_thrust
-                self.get_logger().info(f'Thrust increased to {self.current_thrust_:.2f} N')
-                # Immediately apply the new thrust
-                self.apply_thrust()
+                if self.use_center_thruster_:
+                    self.target_center_thrust_ = new_thrust
+                else:
+                    self.target_left_thrust_ = new_thrust
+                    self.target_right_thrust_ = new_thrust
+                self.get_logger().info(f'Thrust target increased to {self.current_thrust_:.2f} N')
     
     def decrement_thrust(self):
-        """Decrement thrust by thrust_increment_"""
+        """Decrement thrust target by thrust_increment_"""
         with self.thrust_lock_:
             new_thrust = max(self.current_thrust_ - self.thrust_increment_, self.min_thrust_)
             if new_thrust != self.current_thrust_:
                 self.current_thrust_ = new_thrust
-                self.left_thrust_ = new_thrust
-                self.right_thrust_ = new_thrust
-                self.get_logger().info(f'Thrust decreased to {self.current_thrust_:.2f} N')
-                # Immediately apply the new thrust
-                self.apply_thrust()
+                if self.use_center_thruster_:
+                    self.target_center_thrust_ = new_thrust
+                else:
+                    self.target_left_thrust_ = new_thrust
+                    self.target_right_thrust_ = new_thrust
+                self.get_logger().info(f'Thrust target decreased to {self.current_thrust_:.2f} N')
     
     def get_aircraft_mass(self):
         """
@@ -343,25 +375,28 @@ class MaridThrustController(Node):
             return None
     
     def left_thrust_callback(self, msg):
-        """Set left thruster command (in Newtons)"""
+        """Set left thruster target (in Newtons)"""
         with self.thrust_lock_:
-            self.left_thrust_ = max(self.min_thrust_, min(self.max_thrust_, msg.data))
-            self.get_logger().debug(f'Left thrust command: {self.left_thrust_:.2f} N')
+            self.target_left_thrust_ = max(self.min_thrust_, min(self.max_thrust_, msg.data))
+            self.get_logger().debug(f'Left thrust target: {self.target_left_thrust_:.2f} N')
     
     def right_thrust_callback(self, msg):
-        """Set right thruster command (in Newtons)"""
+        """Set right thruster target (in Newtons)"""
         with self.thrust_lock_:
-            self.right_thrust_ = max(self.min_thrust_, min(self.max_thrust_, msg.data))
-            self.get_logger().debug(f'Right thrust command: {self.right_thrust_:.2f} N')
+            self.target_right_thrust_ = max(self.min_thrust_, min(self.max_thrust_, msg.data))
+            self.get_logger().debug(f'Right thrust target: {self.target_right_thrust_:.2f} N')
     
     def total_thrust_callback(self, msg):
-        """Set both thrusters to the same value (in Newtons)"""
+        """Set both thrusters to the same target value (in Newtons)"""
         with self.thrust_lock_:
             thrust = max(self.min_thrust_, min(self.max_thrust_, msg.data))
             self.current_thrust_ = thrust
-            self.left_thrust_ = thrust
-            self.right_thrust_ = thrust
-            self.get_logger().debug(f'Total thrust command: {thrust:.2f} N')
+            if self.use_center_thruster_:
+                self.target_center_thrust_ = thrust  # Set center target for center thruster mode
+            else:
+                self.target_left_thrust_ = thrust
+                self.target_right_thrust_ = thrust
+            self.get_logger().debug(f'Total thrust target: {thrust:.2f} N')
     
     def yaw_differential_callback(self, msg):
         """Set yaw differential (-1.0 to 1.0)
@@ -379,32 +414,36 @@ class MaridThrustController(Node):
         self.current_velocity_ = (linear_vel.x**2 + linear_vel.y**2 + linear_vel.z**2)**0.5
     
     def calculate_thrust_values(self):
-        """Calculate left and right thrust values with optional differential control"""
+        """Calculate thrust target values - returns center thrust or (left, right) depending on mode"""
         with self.thrust_lock_:
-            if self.enable_differential_:
-                # Apply differential thrust for yaw control
-                # yaw_differential > 0 means turn right (positive yaw), so increase left thrust
-                # yaw_differential < 0 means turn left (negative yaw), so increase right thrust
-                # To turn right: more left thrust creates positive yaw torque
-                # To turn left: more right thrust creates negative yaw torque
-                differential_gain = 1.0  # Max 100% differential (full range for effective steering)
-                base_thrust = self.current_thrust_
-                differential = self.yaw_differential_ * differential_gain * base_thrust
-                
-                # Positive differential → more left thrust → turn right
-                # Negative differential → more right thrust → turn left
-                left_thrust = self.left_thrust_ + differential
-                right_thrust = self.right_thrust_ - differential
+            if self.use_center_thruster_:
+                # Center thruster mode - return single value
+                center_target = max(self.min_thrust_, min(self.max_thrust_, self.target_center_thrust_))
+                return center_target, None  # Return center, None for right
             else:
-                # Equal thrust to both (simplified mode)
-                left_thrust = self.left_thrust_
-                right_thrust = self.right_thrust_
-            
-            # Clamp to valid range
-            left_thrust = max(self.min_thrust_, min(self.max_thrust_, left_thrust))
-            right_thrust = max(self.min_thrust_, min(self.max_thrust_, right_thrust))
-            
-            return left_thrust, right_thrust
+                # Dual thruster mode
+                if self.enable_differential_:
+                    # Apply differential thrust for yaw control while maintaining total thrust
+                    # Total thrust = left + right should remain constant
+                    base_thrust = (self.target_left_thrust_ + self.target_right_thrust_) / 2.0
+                    differential_gain = 0.3  # Max 30% differential (reduced from 100% for stability)
+                    differential = self.yaw_differential_ * differential_gain * base_thrust
+                    
+                    # Maintain symmetry: left + right = 2 * base_thrust
+                    # Positive differential → more left thrust → turn right
+                    # Negative differential → more right thrust → turn left
+                    left_target = base_thrust + differential
+                    right_target = base_thrust - differential
+                else:
+                    # Equal thrust to both
+                    left_target = self.target_left_thrust_
+                    right_target = self.target_right_thrust_
+                
+                # Clamp to valid range
+                left_target = max(self.min_thrust_, min(self.max_thrust_, left_target))
+                right_target = max(self.min_thrust_, min(self.max_thrust_, right_target))
+                
+                return left_target, right_target
     
     def check_and_start_thrust(self):
         """Check if delay has passed and start applying thrust"""
@@ -422,12 +461,95 @@ class MaridThrustController(Node):
             self.get_logger().info('Initial thrust call completed. Timer will continue at 10 Hz.')
     
     def apply_thrust(self):
-        """Apply thrust using Gazebo Thruster plugin (angular velocity commands) or legacy wrench"""
+        """Apply thrust with rate limiting and smoothing using Gazebo Thruster plugin or legacy wrench"""
         # Don't apply thrust until model is spawned
         if not self.thrust_started_:
             return
         
-        left_thrust, right_thrust = self.calculate_thrust_values()
+        # Get target values (center thruster or left/right depending on mode)
+        thrust_values = self.calculate_thrust_values()
+        
+        if self.use_center_thruster_:
+            # Center thruster mode
+            target_center = thrust_values[0]
+            
+            # Calculate time delta for rate limiting
+            if not hasattr(self, '_last_update_time'):
+                self._last_update_time = self.get_clock().now()
+                dt = 0.02  # Assume 50 Hz = 0.02s
+            else:
+                current_time = self.get_clock().now()
+                dt = (current_time - self._last_update_time).nanoseconds / 1e9
+                self._last_update_time = current_time
+                
+                # Clamp dt to prevent issues from system lag
+                dt = max(0.001, min(0.1, dt))  # Between 1ms and 100ms
+            
+            # Apply rate limiting
+            max_change = self.thrust_rate_limit_ * dt
+            center_change = target_center - self.last_published_center_
+            
+            if abs(center_change) > max_change:
+                center_change = max_change if center_change > 0 else -max_change
+            
+            # Apply exponential smoothing
+            if self.thrust_smoothing_factor_ > 0:
+                alpha = self.thrust_smoothing_factor_
+                center_thrust = self.last_published_center_ + alpha * (target_center - self.last_published_center_)
+            else:
+                center_thrust = self.last_published_center_ + center_change
+            
+            # Update last published value
+            self.last_published_center_ = center_thrust
+            
+            if self.use_thruster_plugin_:
+                # Convert thrust (N) to angular velocity (rad/s)
+                center_omega = self.thrust_to_angvel_gain_ * math.sqrt(max(0.0, center_thrust))
+                
+                # Publish angular velocity command
+                center_cmd = Float64()
+                center_cmd.data = center_omega
+                self.center_thruster_cmd_pub_.publish(center_cmd)
+            return  # Exit early for center thruster mode
+        
+        # Dual thruster mode (original logic)
+        target_left, target_right = thrust_values
+        
+        # Calculate time delta for rate limiting
+        if not hasattr(self, '_last_update_time'):
+            self._last_update_time = self.get_clock().now()
+            dt = 0.02  # Assume 50 Hz = 0.02s
+        else:
+            current_time = self.get_clock().now()
+            dt = (current_time - self._last_update_time).nanoseconds / 1e9
+            self._last_update_time = current_time
+            
+            # Clamp dt to prevent issues from system lag
+            dt = max(0.001, min(0.1, dt))  # Between 1ms and 100ms
+        
+        # Apply rate limiting
+        max_change = self.thrust_rate_limit_ * dt
+        left_change = target_left - self.last_published_left_
+        right_change = target_right - self.last_published_right_
+        
+        if abs(left_change) > max_change:
+            left_change = max_change if left_change > 0 else -max_change
+        if abs(right_change) > max_change:
+            right_change = max_change if right_change > 0 else -max_change
+        
+        # Apply exponential smoothing (optional, can be disabled by setting factor to 0)
+        if self.thrust_smoothing_factor_ > 0:
+            alpha = self.thrust_smoothing_factor_  # 0.0 = no smoothing, 1.0 = full smoothing
+            left_thrust = self.last_published_left_ + alpha * (target_left - self.last_published_left_)
+            right_thrust = self.last_published_right_ + alpha * (target_right - self.last_published_right_)
+        else:
+            # Just rate limiting, no smoothing
+            left_thrust = self.last_published_left_ + left_change
+            right_thrust = self.last_published_right_ + right_change
+        
+        # Update last published values
+        self.last_published_left_ = left_thrust
+        self.last_published_right_ = right_thrust
         
         if self.use_thruster_plugin_:
             # ===== NEW: Use Gazebo Thruster Plugin =====
