@@ -361,18 +361,18 @@
   <!-- Center Thruster (for single-thruster testing) -->
   <link name="thruster_center">
     <inertial>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
-      <mass value="0.05"/>
-      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- Rotate 90° around X so local Z aligns with body Y (forward direction) -->
+      <mass value="0.05"/>  <!-- Increased from 0.001 to 0.05 for better stability -->
+      <inertia ixx="5e-4" ixy="0" ixz="0" iyy="5e-4" iyz="0" izz="5e-4"/>  <!-- Scaled with mass -->
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- Rotation only in visual -->
       <geometry><cylinder length="0.1" radius="0.015"/></geometry>
       <material name="green_thruster">
         <color rgba="0.0 1.0 0.0 1.0"/>
       </material>
     </visual>
-    <collision><origin xyz="0 0 0" rpy="1.5708 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
+    <!-- NO COLLISION - prevents overlap issues, thruster is visual-only and force application doesn't need collision -->
   </link>
 
   <joint name="thruster_center_joint" type="revolute">
@@ -380,8 +380,8 @@
     <child link="thruster_center"/>
     <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>  <!-- At COM - no moments -->
     <axis xyz="0 1 0"/>
-    <limit lower="-3.14159" upper="3.14159" effort="100" velocity="100"/>
-    <dynamics damping="0.01" friction="0.0"/>
+    <limit lower="-1000" upper="1000" effort="1000" velocity="1000"/>  <!-- Very loose limits for unlimited rotation -->
+    <dynamics damping="0.0" friction="0.0"/>  <!-- Zero damping to allow full reaction torque visibility -->
   </joint>
 
 </robot>

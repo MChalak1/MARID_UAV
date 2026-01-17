@@ -65,12 +65,12 @@ def generate_launch_description():
         period=3.0,  # 3 seconds for world to fully load
         actions=[
             Node(
-                package="ros_gz_sim",
-                executable="create",
-                output="screen",
-                arguments=["-topic", "robot_description",
-                           "-name", "marid",
-                           "-x", "0", "-y", "0", "-z", "5.0"]
+        package="ros_gz_sim",
+        executable="create",
+        output="screen",
+        arguments=["-topic", "robot_description",
+                   "-name", "marid",
+                   "-x", "0", "-y", "0", "-z", "5.0"]
             )
         ]
     )

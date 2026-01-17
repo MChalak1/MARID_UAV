@@ -58,7 +58,7 @@
             <debug>true</debug>  <!-- ADD DEBUG OUTPUT -->
             <visualize>true</visualize>  <!-- VISUAL FORCES -->
         </plugin>
-    </gazebo> 
+    </gazebo>
 
     <gazebo>
         <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
@@ -127,6 +127,40 @@
             <up>0 0 1</up>
             <cp>0 0 0</cp>  <!-- No offset for fuselage -->
             <debug>true</debug>
+        </plugin>
+    </gazebo>
+
+    <!-- Aerodynamic Damping for Main Body (prevents uncontrolled rotations and drift) -->
+    <gazebo reference="base_link_front">
+        <plugin filename="libgz-sim8-hydrodynamics-system.so" 
+                name="gz::sim::systems::Hydrodynamics">
+            <link_name>base_link_front</link_name>
+            
+            <!-- Linear drag coefficients (X, Y, Z) - acts like air resistance -->
+            <xDotU>-0.5</xDotU>    <!-- Forward drag (X-axis) -->
+            <yDotV>-1.0</yDotV>    <!-- Side drag (Y-axis - your forward) -->
+            <zDotW>-1.0</zDotW>    <!-- Vertical drag (Z-axis) -->
+            
+            <!-- Angular drag coefficients (Roll, Pitch, Yaw) - rotational damping -->
+            <kDotP>-2.0</kDotP>    <!-- Roll damping (around X) -->
+            <mDotQ>-2.0</mDotQ>     <!-- Pitch damping (around Y) -->
+            <nDotR>-2.0</nDotR>     <!-- Yaw damping (around Z) -->
+            
+            <!-- Quadratic drag (velocity-squared terms) -->
+            <xUabsU>-0.1</xUabsU>   <!-- Forward quadratic drag -->
+            <yVabsV>-0.2</yVabsV>   <!-- Side quadratic drag -->
+            <zWabsW>-0.2</zWabsW>   <!-- Vertical quadratic drag -->
+            <kPabsP>-1.0</kPabsP>  <!-- Roll quadratic damping -->
+            <mQabsQ>-1.0</mQabsQ>  <!-- Pitch quadratic damping -->
+            <nRabsR>-1.0</nRabsR>  <!-- Yaw quadratic damping -->
+            
+            <!-- Linear velocity terms (usually zero for air) -->
+            <xU>0</xU>
+            <yV>0</yV>
+            <zW>0</zW>
+            <kP>0</kP>
+            <mQ>0</mQ>
+            <nR>0</nR>
         </plugin>
     </gazebo>
 
