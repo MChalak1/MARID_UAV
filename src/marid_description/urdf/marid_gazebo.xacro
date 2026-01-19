@@ -46,10 +46,10 @@
     <gazebo>
         <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
             <link_name>left_wing</link_name>
-            <air_density>1.225</air_density>
+            <air_density>1.225</air_density>  <!-- Air density at sea level (kg/m³) -->
             <area>0.20674668328</area>  <!-- Increased for testing -->
             <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
-            <cla>2.0</cla>    <!-- Increased lift -->
+            <cla>3.0</cla>    <!-- Lift coefficient for wing -->
             <cda>0.5</cda>     <!-- Increased drag -->
             <alpha_stall>0.35</alpha_stall>
             <forward>0 1 0</forward>
@@ -63,10 +63,10 @@
     <gazebo>
         <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
             <link_name>right_wing</link_name>
-            <air_density>1.225</air_density>
+            <air_density>1.225</air_density>  <!-- Air density at sea level (kg/m³) -->
             <area>0.20674668328</area>
             <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
-            <cla>2.0</cla>
+            <cla>3.0</cla>    <!-- Lift coefficient for wing -->
             <cda>0.5</cda>
             <alpha_stall>0.35</alpha_stall>
             <forward>0 1 0</forward>
@@ -81,10 +81,10 @@
     <gazebo>
         <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
             <link_name>tail_left</link_name>
-            <air_density>1.225</air_density>
+            <air_density>1.225</air_density>  <!-- Air density at sea level (kg/m³) -->
             <area>0.05733020792</area>  <!-- Increased for testing -->
             <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
-            <cla>2.0</cla>    <!-- Increased lift -->
+            <cla>0.8</cla>    <!-- Reasonable value for V-tail control surfaces -->
             <cda>0.5</cda>     <!-- Increased drag -->
             <alpha_stall>0.35</alpha_stall>
             <forward>0 1 0</forward>
@@ -98,10 +98,10 @@
     <gazebo>
         <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
             <link_name>tail_right</link_name>
-            <air_density>1.225</air_density>
+            <air_density>1.225</air_density>  <!-- Air density at sea level (kg/m³) -->
             <area>0.05733020792</area>
             <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
-            <cla>2.0</cla>
+            <cla>0.8</cla>    <!-- Reasonable value for V-tail control surfaces -->
             <cda>0.5</cda>
             <alpha_stall>0.35</alpha_stall>
             <forward>0 1 0</forward>
@@ -117,10 +117,10 @@
     <gazebo>
         <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
             <link_name>base_link_front</link_name>
-            <air_density>1.225</air_density>
+            <air_density>1.225</air_density>  <!-- Air density at sea level (kg/m³) -->
             <area>1.1425454568</area>
             <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
-            <cla>0.0</cla>
+            <cla>0.5</cla>  <!-- Added positive lift coefficient to counteract downward motion -->
             <cda>0.2</cda>  <!-- Increased drag -->
             <alpha_stall>1.57</alpha_stall>
             <forward>0 1 0</forward>
@@ -167,10 +167,10 @@
     <gazebo reference="main_tail">
         <plugin filename="libgz-sim8-lift-drag-system.so" name="gz::sim::systems::LiftDrag">
             <link_name>main_tail</link_name>
-            <air_density>1.225</air_density>
+            <air_density>1.225</air_density>  <!-- Air density at sea level (kg/m³) -->
             <area>0.1447926136</area>
             <a0>0.0</a0>  <!-- Zero-lift angle of attack (radians) -->
-            <cla>0.0</cla>
+            <cla>0.4</cla>  <!-- Reverted to original value -->
             <cda>0.15</cda>  <!-- Increased drag -->
             <alpha_stall>1.57</alpha_stall>
             <forward>0 1 0</forward>
@@ -201,7 +201,7 @@
             <joint_name>thruster_R_joint</joint_name>
             <fluid_density>1.225</fluid_density>
             <propeller_diameter>0.2</propeller_diameter>
-            <thrust_coefficient>0.8</thrust_coefficient>
+            <thrust_coefficient>0.8</thrust_coefficient>  <!-- Reverted to positive - use opposite angular velocity commands for counter-rotation -->
             <use_angvel_cmd>true</use_angvel_cmd>
         </plugin>
     </gazebo>

@@ -29,7 +29,7 @@
   <link name="base_link_front">  
     <inertial>
       <mass value="3.0903248"/> 
-      <origin xyz="0 0 0" rpy="0 0 0"/>  <!-- Fixed: COM at geometric center for stability -->
+      <origin xyz="0 0.15 0" rpy="0 0 0"/>  <!-- COG moved forward to Y = 0.15 m to account for sensors, batteries, and electronics in front -->
       <inertia ixx="0.1110930358" ixy="0.0" ixz="0.0" iyy="0.0247075659" iyz="0.0" izz="0.1288539854"/>  <!-- Fixed: Zeroed iyz to eliminate cross-coupling moments -->
     </inertial>
     <visual>
@@ -176,7 +176,7 @@
   <joint name="tail_left_joint" type="revolute">
     <parent link="main_tail"/>
     <child link="tail_left"/>
-    <origin xyz="0 -.28 0" rpy="0 0 0"/>
+    <origin xyz="0 -.28 0" rpy="0.3491 0 0"/>
     <axis xyz="0.7071 0 -0.7071"/>
     <dynamics damping="10" friction="5"/>
     <sensor name="left_tail_ft" type="force_torque">
@@ -214,7 +214,7 @@
   <joint name="tail_right_joint" type="revolute">
     <parent link="main_tail"/>
     <child link="tail_right"/>
-    <origin xyz="0 -0.28 0" rpy="0 0 0"/>
+    <origin xyz="0 -0.28 0" rpy="0.3491 0 0"/>
     <axis xyz="0.7071 0 0.7071"/>
     <dynamics damping="10" friction="5"/>
     <sensor name="right_tail_ft" type="force_torque">
@@ -312,7 +312,7 @@
 
   <link name="thruster_L">
     <inertial>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="0.05"/>
       
       <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
@@ -328,7 +328,7 @@
 
   <link name="thruster_R">
     <inertial>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="0.05"/>
       <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
       </inertial>
@@ -340,33 +340,33 @@
       <collision><origin xyz="0 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
   </link>
 
-  <joint name="thruster_L_joint" type="revolute">
+  <joint name="thruster_L_joint" type="continuous">
     <parent link="base_link_front"/>
     <child  link="thruster_L"/>
-    <origin xyz="-0.15 0.0 -0.02" rpy="0 0 0"/>  <!-- Fixed: Moved closer to COM to reduce moments -->
+    <origin xyz="-0.15 0.0 -0.02" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>  <!-- Reverted: Original axis was correct -->
-    <limit lower="-3.14159" upper="3.14159" effort="100" velocity="100"/>
-    <dynamics damping="0.01" friction="0.0"/>
+    <!-- Continuous joints don't have limits - unlimited rotation for propellers -->
+    <dynamics damping="0.0" friction="0.0"/>  <!-- Zero damping to allow full reaction torque visibility -->
   </joint>
 
-  <joint name="thruster_R_joint" type="revolute">
+  <joint name="thruster_R_joint" type="continuous">
     <parent link="base_link_front"/>
     <child  link="thruster_R"/>
-    <origin xyz="0.15 0.0 -0.02" rpy="0 0 0"/>  <!-- Fixed: Moved closer to COM to reduce moments -->
+    <origin xyz="0.15 0.0 -0.02" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>  <!-- Reverted: Original axis was correct -->
-    <limit lower="-3.14159" upper="3.14159" effort="100" velocity="100"/>
-    <dynamics damping="0.01" friction="0.0"/>
+    <!-- Continuous joints don't have limits - unlimited rotation for propellers -->
+    <dynamics damping="0.0" friction="0.0"/>  <!-- Zero damping to allow full reaction torque visibility -->
   </joint>
 
   <!-- Center Thruster (for single-thruster testing) -->
   <link name="thruster_center">
     <inertial>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- Rotate 90° around X so local Z aligns with body Y (forward direction) -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>  <!-- No rotation in inertial frame - force application should align with joint axis -->
       <mass value="0.05"/>  <!-- Increased from 0.001 to 0.05 for better stability -->
       <inertia ixx="5e-4" ixy="0" ixz="0" iyy="5e-4" iyz="0" izz="5e-4"/>  <!-- Scaled with mass -->
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- Rotation only in visual -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>  <!-- Removed rotation to test if visual frame affects force direction -->
       <geometry><cylinder length="0.1" radius="0.015"/></geometry>
       <material name="green_thruster">
         <color rgba="0.0 1.0 0.0 1.0"/>
@@ -375,13 +375,13 @@
     <!-- NO COLLISION - prevents overlap issues, thruster is visual-only and force application doesn't need collision -->
   </link>
 
-  <joint name="thruster_center_joint" type="revolute">
+  <joint name="thruster_center_joint" type="continuous">
     <parent link="base_link_front"/>
     <child link="thruster_center"/>
-    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>  <!-- At COM - no moments -->
-    <axis xyz="0 1 0"/>
-    <limit lower="-1000" upper="1000" effort="1000" velocity="1000"/>  <!-- Very loose limits for unlimited rotation -->
-    <dynamics damping="0.0" friction="0.0"/>  <!-- Zero damping to allow full reaction torque visibility -->
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>  <!-- Back at COM - no moments to prevent initial roll -->
+    <axis xyz="0 1 0"/>  <!-- Correct axis: rotation around Y-axis for forward thrust -->
+    <!-- Continuous joints don't have limits - unlimited rotation for propellers -->
+    <dynamics damping="0.0" friction="0.0"/>  <!-- Zero damping and friction for reaction torque visibility -->
   </joint>
 
 </robot>

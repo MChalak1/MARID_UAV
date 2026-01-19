@@ -234,6 +234,20 @@ Data is saved to:
 
 ---
 
+## 📚 Documentation
+
+### Physics Reference
+- **[Physics Formulas & Equations Reference](PHYSICS_FORMULAS.md)**  
+  Complete documentation of all physics formulas, aerodynamic equations, stability calculations, and simulation parameters. This document is **essential** for understanding:
+  - Aerodynamic lift and drag calculations
+  - Propulsion and thruster models
+  - Stability analysis (aerodynamic center vs. center of gravity)
+  - Control system equations
+  - Sensor models and noise characteristics
+  - CFD validation requirements
+
+---
+
 ## 🤖 ML Training Workflow (Option A)
 
 ### Phase 1 — Data Collection
