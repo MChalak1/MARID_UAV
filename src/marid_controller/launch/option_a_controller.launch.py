@@ -66,10 +66,10 @@ def generate_launch_description():
                 'link_name': 'base_link_front',
                 'update_rate': 50.0,  # Increased to match thruster plugin update rate
                 'enable_keyboard': False,  # Disabled in Option A (guidance controls it)
-                'enable_differential': True,  # Enable differential for yaw control
+                'enable_differential': False,  # Disable differential thrust - yaw controlled aerodynamically
                 'thrust_to_angvel_gain': 50.0,  # Conversion factor: omega = gain * sqrt(thrust)
                 'use_thruster_plugin': True,  # Use Gazebo Thruster plugin (True) or legacy wrench (False)
-                'use_center_thruster': True,  # Use single center thruster (True) or dual left/right (False) - set to True for testing
+                'use_center_thruster': False,  # Use single center thruster (True) or dual left/right (False) - set to True for testing
                 'use_sim_time': True,
             }]
         ),
@@ -126,11 +126,12 @@ def generate_launch_description():
                     parameters=[{
                         'update_rate': 50.0,
                         # Thrust parameters
-                        'thrust_to_weight_ratio': 0.65,  # Reduced from 2.5: gives max thrust ~1.3x weight (reasonable for aircraft)
+                        'base_thrust_override': 1.0,  # Fixed thrust of 1.0N (overrides PID calculations)
+                        'thrust_to_weight_ratio': 0.65,  # Not used when override is set
                         'min_thrust': 0.0,
                         'max_yaw_differential': 0.2,
-                        # Physics-based thrust
-                        'use_physics_thrust': True,
+                        # Physics-based thrust (disabled for fixed thrust test)
+                        'use_physics_thrust': False,
                         'use_airspeed_sensor': True,
                         'drag_coefficient': 0.1,  # Tune based on your model
                         'air_density': 1.225,  # kg/m³ at sea level
@@ -138,18 +139,18 @@ def generate_launch_description():
                         'wind_x': 0.0,
                         'wind_y': 0.0,
                         'wind_z': 0.0,
-                        # PID gains for tracking guidance targets (reduced for stability)
-                        'speed_kp': 0.5,  # Reduced from 1.0
-                        'speed_ki': 0.05,
-                        'speed_kd': 0.3,
-                        'heading_rate_kp': 1.0,
+                        # PID gains (disabled for fixed thrust test, but can still be used for attitude control)
+                        'speed_kp': 0.0,  # Disabled - not used when override is set
+                        'speed_ki': 0.0,
+                        'speed_kd': 0.0,
+                        'heading_rate_kp': 1.0,  # Still active for yaw control
                         'heading_rate_ki': 0.1,
                         'heading_rate_kd': 0.3,
-                        # Altitude control (reduced gains for stability)
-                        'altitude_kp': 1.0,  # Reduced from 2.0
-                        'altitude_ki': 0.1,
-                        'altitude_kd': 0.8,  # Increased damping from 0.5
-                        'target_altitude': 5.0,  # m
+                        # Altitude control (disabled for fixed thrust test)
+                        'altitude_kp': 0.0,  # Disabled - not used when override is set
+                        'altitude_ki': 0.0,
+                        'altitude_kd': 0.0,
+                        'target_altitude': 5.0,  # Not used when override is set
                         'use_sim_time': True,
                     }]
                 )

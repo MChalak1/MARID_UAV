@@ -201,7 +201,7 @@
             <joint_name>thruster_R_joint</joint_name>
             <fluid_density>1.225</fluid_density>
             <propeller_diameter>0.2</propeller_diameter>
-            <thrust_coefficient>0.8</thrust_coefficient>  <!-- Reverted to positive - use opposite angular velocity commands for counter-rotation -->
+            <thrust_coefficient>0.8</thrust_coefficient>  <!-- Positive coefficient - counter-rotation achieved via reversed joint axis -->
             <use_angvel_cmd>true</use_angvel_cmd>
         </plugin>
     </gazebo>
@@ -224,7 +224,7 @@
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>left_wing_joint</joint_name>
-            <p_gain>0.5</p_gain>  <!-- Increased from 0.1 for faster control surface response -->
+            <p_gain>15.0</p_gain>  <!-- Increased to overcome damping (2.5) + friction (1.0) for servo-like behavior -->
             <topic>/model/marid/joint/left_wing_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
@@ -234,7 +234,7 @@
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>right_wing_joint</joint_name>
-            <p_gain>0.5</p_gain>  <!-- Increased from 0.1 for faster control surface response -->
+            <p_gain>15.0</p_gain>  <!-- Increased to overcome damping (2.5) + friction (1.0) for servo-like behavior -->
             <topic>/model/marid/joint/right_wing_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
@@ -244,7 +244,7 @@
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>tail_left_joint</joint_name>
-            <p_gain>0.5</p_gain>  <!-- Increased from 0.1 for faster control surface response -->
+            <p_gain>15.0</p_gain>  <!-- Increased to overcome damping (2.5) + friction (1.0) for servo-like behavior -->
             <topic>/model/marid/joint/tail_left_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
@@ -254,7 +254,7 @@
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>tail_right_joint</joint_name>
-            <p_gain>0.5</p_gain>  <!-- Increased from 0.1 for faster control surface response -->
+            <p_gain>15.0</p_gain>  <!-- Increased to overcome damping (2.5) + friction (1.0) for servo-like behavior -->
             <topic>/model/marid/joint/tail_right_joint/cmd_pos</topic>
         </plugin>
     </gazebo>

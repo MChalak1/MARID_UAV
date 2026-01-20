@@ -151,8 +151,10 @@ class MaridGuidanceTracker(Node):
         # Parameters
         self.declare_parameter('update_rate', 50.0)
         self.declare_parameter('thrust_to_weight_ratio', 2.5)
-        self.declare_parameter('max_thrust', None)  # Auto-calculate if None
-        self.declare_parameter('base_thrust_override', None)
+        # Use -1.0 as sentinel for "not set" (None equivalent)
+        # -1.0 means "auto-calculate" or "not set"
+        self.declare_parameter('max_thrust', -1.0)
+        self.declare_parameter('base_thrust_override', -1.0)
         self.declare_parameter('min_thrust', 0.0)
         self.declare_parameter('max_yaw_differential', 0.2)
         
@@ -206,12 +208,18 @@ class MaridGuidanceTracker(Node):
         max_thrust_param = self.get_parameter('max_thrust').value
         base_thrust_override = self.get_parameter('base_thrust_override').value
         
-        if max_thrust_param is None or base_thrust_override is not None:
+        # Store override value (>= 0 means use fixed thrust, -1.0 means not set)
+        self.base_thrust_override_ = base_thrust_override if base_thrust_override >= 0 else None
+        
+        # Treat -1.0 as "not set" (None equivalent)
+        if max_thrust_param < 0 or base_thrust_override >= 0:
             aircraft_mass = self.get_aircraft_mass()
             if aircraft_mass is not None:
                 self.aircraft_mass_ = aircraft_mass
-                if base_thrust_override is not None:
-                    self.max_thrust_ = float(base_thrust_override)
+                if base_thrust_override >= 0:
+                    self.max_thrust_ = float(base_thrust_override)  # Set max to override value
+                    if self.base_thrust_override_ is not None:
+                        self.get_logger().info(f'Fixed thrust mode enabled: {self.base_thrust_override_:.2f} N (overrides PID calculations)')
                 else:
                     g = 9.81
                     weight = aircraft_mass * g
@@ -219,7 +227,7 @@ class MaridGuidanceTracker(Node):
                 self.get_logger().info(f'Aircraft mass: {aircraft_mass:.2f} kg, max_thrust: {self.max_thrust_:.2f} N')
             else:
                 self.aircraft_mass_ = 10.0  # Default fallback
-                self.max_thrust_ = 200.0 if max_thrust_param is None else float(max_thrust_param)
+                self.max_thrust_ = 200.0 if max_thrust_param < 0 else float(max_thrust_param)
                 self.get_logger().warn(f'Could not determine mass, using default max_thrust: {self.max_thrust_:.2f} N')
         else:
             self.max_thrust_ = float(max_thrust_param)
@@ -495,11 +503,23 @@ class MaridGuidanceTracker(Node):
             # Maintain altitude (prevent falling during startup)
             altitude_error = self.target_altitude_ - current_altitude
             altitude_thrust = self.altitude_pid_.update(altitude_error, current_time)
-            altitude_thrust = np.clip(altitude_thrust, self.min_thrust_, self.max_thrust_)
+            
+            # Add weight as base offset (works for both gravity and no-gravity cases)
+            g = 9.81
+            weight = self.aircraft_mass_ * g
+            total_thrust = weight + altitude_thrust
+            
+            # Safety: Ensure minimum thrust during initialization to prevent zero thrust
+            # This is especially important when gravity = 0 (weight = 0)
+            if total_thrust < 1.0:
+                total_thrust = max(total_thrust, 1.0)
+                self.get_logger().debug(f'Applied minimum thrust during initialization: {total_thrust:.2f}N')
+            
+            total_thrust = np.clip(total_thrust, self.min_thrust_, self.max_thrust_)
             
             # Publish altitude-only thrust (no yaw command)
             thrust_msg = Float64()
-            thrust_msg.data = float(altitude_thrust)
+            thrust_msg.data = float(total_thrust)
             self.total_thrust_pub_.publish(thrust_msg)
             
             yaw_msg = Float64()
@@ -530,8 +550,10 @@ class MaridGuidanceTracker(Node):
             self.altitude_pid_.reset()
             altitude_thrust = 0.0
         
-        # Base thrust from altitude control (should be ~weight when at target altitude)
-        base_thrust = altitude_thrust
+        # Base thrust = weight (for gravity compensation) + altitude correction
+        # If gravity = 0, weight = 0, so this works for both gravity and no-gravity cases
+        # This prevents initial nose-dive by providing weight compensation from the start
+        base_thrust = weight + altitude_thrust
         
         if self.use_physics_thrust_:
             # Drag force = drag_coefficient * airspeed²
@@ -565,17 +587,28 @@ class MaridGuidanceTracker(Node):
             current_yaw_rate = self.current_imu_.angular_velocity.z
         
         heading_rate_error = self.desired_heading_rate_ - current_yaw_rate
+        
+        # Add deadband to prevent integral windup from IMU noise
+        # Ignore small errors (< 0.05 rad/s ≈ 2.9 deg/s) to prevent constant yaw_differential
+        HEADING_RATE_DEADBAND = 0.05  # rad/s
+        if abs(heading_rate_error) < HEADING_RATE_DEADBAND:
+            heading_rate_error = 0.0
+        
         yaw_differential = self.heading_rate_pid_.update(heading_rate_error, current_time)
         yaw_differential = np.clip(yaw_differential, -self.max_yaw_differential_, self.max_yaw_differential_)
         
-        # Total thrust = base (altitude) + speed compensation
-        # Don't double-count weight - altitude PID handles it
-        total_thrust = base_thrust + speed_thrust
-        
-        # Check for NaN before clipping
-        if not np.isfinite(total_thrust):
-            self.get_logger().debug(f'Total thrust is NaN (base: {base_thrust}, speed: {speed_thrust}), using fallback')
-            total_thrust = self.min_thrust_
+        # If base_thrust_override is set, use it as fixed thrust (ignore all PID calculations)
+        if self.base_thrust_override_ is not None:
+            total_thrust = float(self.base_thrust_override_)
+            self.get_logger().debug(f'Using fixed thrust override: {total_thrust:.2f} N')
+        else:
+            # Normal PID-based calculation
+            total_thrust = base_thrust + speed_thrust
+            
+            # Check for NaN before clipping
+            if not np.isfinite(total_thrust):
+                self.get_logger().debug(f'Total thrust is NaN (base: {base_thrust}, speed: {speed_thrust}), using fallback')
+                total_thrust = self.min_thrust_
         
         total_thrust = np.clip(total_thrust, self.min_thrust_, self.max_thrust_)
         

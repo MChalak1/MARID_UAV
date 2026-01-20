@@ -2,6 +2,12 @@
 """
 Launch file for MARID Thrust Controller
 Applies thrust forces to the drone using the ApplyLinkWrench plugin in Gazebo.
+
+NOTE: This launch file does NOT include controller.launch.py (joint_state_broadcaster).
+If you need joint position feedback (/joint_states topic), ensure the parent launch file
+includes controller.launch.py. For example:
+  - option_a_controller.launch.py already includes it
+  - If launching standalone, manually include controller.launch.py or use option_a_controller.launch.py
 """
 from launch import LaunchDescription
 from launch_ros.actions import Node
