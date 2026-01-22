@@ -1,117 +1,142 @@
-MARID is an experimental, research-driven project exploring autonomous aerial systems, simulation-first development, and advanced propulsion and control concepts. Contributions are welcome at all levels—questions, critiques, documentation improvements, simulations, and code—but should be made thoughtfully and with respect for the project’s exploratory nature.
+# Contributing to MARID
 
-Guiding Principles
+Thank you for your interest in **MARID**.
 
-Curiosity over certainty
-Many design choices are provisional. Constructive skepticism is encouraged.
+MARID is an experimental, research-driven project focused on autonomous aerial systems, simulation-first development, and exploratory design. Contributions are welcome, but should be made thoughtfully and with respect for the project’s evolving nature.
 
-Simulation-first mindset
-Changes should be reasoned, testable, and ideally supported by simulation or analysis.
+---
 
-Clarity over cleverness
-Readable, well-commented code and clear explanations are preferred over optimization or abstraction.
+## Guiding Principles
 
-Respectful discourse
-Disagreement is expected; dismissiveness is not.
+- **Exploration over finality**  
+  Many design decisions are provisional and subject to change.
 
-Ways to Contribute
+- **Simulation before implementation**  
+  Contributions should be reasoned, testable, and ideally supported by simulation or analysis.
+
+- **Clarity over complexity**  
+  Readable code, explicit assumptions, and clear explanations are preferred.
+
+- **Respectful collaboration**  
+  Critical discussion is encouraged; dismissive or bad-faith engagement is not.
+
+---
+
+## Ways to Contribute
 
 You can contribute by:
 
-Asking technical or conceptual questions in Discussions
+- Asking questions or starting discussions
+- Proposing alternative designs or pointing out limitations
+- Improving documentation or diagrams
+- Fixing bugs or improving simulation fidelity
+- Adding validation, logging, or tests
+- Suggesting improved modeling assumptions (aero, thermal, control, etc.)
 
-Proposing design alternatives or pointing out limitations
+Small, focused contributions are welcome.
 
-Improving documentation or diagrams
+---
 
-Fixing bugs or improving simulation fidelity
+## Getting Started
 
-Adding validation, tests, or logging
+1. Read the **README** to understand the project scope and architecture.
+2. Browse **Discussions** for ongoing or unresolved topics.
+3. Check existing **Issues** before opening a new one.
+4. If unsure where something belongs, start with a Discussion.
 
-Suggesting better modeling assumptions (aero, thermal, control, etc.)
+---
 
-Small, focused contributions are perfectly acceptable.
+## Issues vs Discussions
 
-Getting Started
+Use the appropriate channel:
 
-Read the README to understand the project scope and current architecture.
+### Discussions
+- Conceptual questions  
+- Design trade-offs  
+- Exploratory ideas  
+- Requests for clarification  
 
-Browse Discussions for ongoing or unresolved topics.
+### Issues
+- Bugs  
+- Concrete improvements  
+- Clearly scoped tasks  
 
-Check existing Issues before opening a new one.
+Provide context, reasoning, and references where possible.
 
-If unsure where something belongs, start a Discussion first.
+---
 
-Code Contributions
+## Code Contributions
 
-If you plan to contribute code:
+If you plan to submit code:
 
-Fork the repository and create a feature branch.
+- Fork the repository and create a feature branch.
+- Keep changes scoped to a single concern.
+- Follow existing project structure and naming conventions.
+- Comment assumptions, units, and reference frames explicitly.
+- Avoid introducing new dependencies unless clearly justified.
 
-Keep changes scoped to a single concern where possible.
+### Simulation, Dynamics, and Control Code
 
-Follow existing project structure and naming conventions.
+For guidance, control, or physics-based contributions:
 
-Comment assumptions, units, and reference frames explicitly.
+- Clearly state assumptions (frames, sign conventions, simplifications).
+- Avoid hard-coded constants without explanation.
+- Prefer physically meaningful parameters over tuned "magic numbers".
+- If modifying controllers, explain stability or robustness implications.
 
-Avoid introducing dependencies unless clearly justified.
+---
 
-Simulation & Control Code
-
-For control, guidance, or dynamics-related contributions:
-
-State assumptions clearly (frames, sign conventions, simplifications).
-
-Avoid hard-coded constants without explanation.
-
-Prefer physically meaningful parameters over tuned “magic numbers”.
-
-If modifying controllers, explain stability or robustness implications.
-
-Documentation Contributions
+## Documentation Contributions
 
 Documentation is as valuable as code.
 
-You’re encouraged to:
+You are encouraged to:
 
-Clarify ambiguous sections
+- Clarify ambiguous sections
+- Add diagrams or explanatory comments
+- Improve Markdown files or README sections
+- Correct inaccuracies or outdated assumptions
 
-Add diagrams or explanatory comments
+If something is unclear to you, it is likely unclear to others.
 
-Improve README sections or Markdown files
+---
 
-Correct inaccuracies or outdated assumptions
+## Pull Requests
 
-If something is unclear to you, it’s likely unclear to others.
+Before opening a pull request:
 
-Issues & Discussions
+- Ensure the change builds and runs (if applicable).
+- Describe **what changed** and **why**.
+- Reference related Issues or Discussions when relevant.
+- Be open to review and revision.
 
-Use Issues for bugs, concrete tasks, or actionable improvements.
+Draft pull requests are acceptable for early feedback.
 
-Use Discussions for questions, design debates, and exploratory ideas.
+---
 
-When opening either, provide context and reasoning—not just conclusions.
+## Scope and Expectations
 
-What This Project Is (and Isn’t)
+Please note:
 
-This is not a production system.
-
-This is not a finished or optimized design.
-
-This is an evolving research platform.
-
-This is a place for careful thinking, experimentation, and learning.
+- This is **not** a production-ready system.
+- This is **not** a finalized or optimized design.
+- This **is** an evolving research and learning platform.
 
 Contributions that acknowledge uncertainty and trade-offs are especially appreciated.
 
-Code of Conduct
+---
 
-Be respectful, patient, and professional.
-Harassment, condescension, or bad-faith engagement will not be tolerated.
+## Code of Conduct
 
-Final Note
+All contributors are expected to be respectful, patient, and professional.
 
-You don’t need permission to ask a question or share an idea.
-If you’re thinking carefully and acting in good faith, your contribution is welcome.
+Harassment, condescension, or bad-faith behavior will not be tolerated.
+
+---
+
+## Final Note
+
+You do not need permission to ask a question or share an idea.  
+If you are acting in good faith and thinking carefully, your contribution is welcome.
 
 Thank you for helping improve MARID.
