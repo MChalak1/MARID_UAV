@@ -70,11 +70,11 @@ class MaridAIController(Node):
         self.declare_parameter('enable_pid_fallback', True)
         
         # Waypoint navigation parameters - GPS coordinates (preferred)
-        self.declare_parameter('destination_latitude', None)  # Target destination lat (degrees)
-        self.declare_parameter('destination_longitude', None)  # Target destination lon (degrees)
+        self.declare_parameter('destination_latitude', -1.0)  # Target destination lat (degrees)
+        self.declare_parameter('destination_longitude', -1.0)  # Target destination lon (degrees)
         # Local coordinates (backward compatibility)
-        self.declare_parameter('destination_x', None)  # Target destination X (m) - optional
-        self.declare_parameter('destination_y', None)  # Target destination Y (m) - optional
+        self.declare_parameter('destination_x', -1.0)  # Target destination X (m) - optional
+        self.declare_parameter('destination_y', -1.0)  # Target destination Y (m) - optional
         
         # Datum (reference point) - should match navsat_transform.yaml
         self.declare_parameter('datum_latitude', 37.45397139527321)  # Reference latitude (degrees)
@@ -92,7 +92,7 @@ class MaridAIController(Node):
         self.declare_parameter('min_thrust', 0.0)
         self.declare_parameter('max_thrust', None)  # None = auto-calculate from mass
         self.declare_parameter('thrust_to_weight_ratio', 2.5)  # Thrust-to-weight ratio (e.g., 2.5 = 2.5x weight)
-        self.declare_parameter('base_thrust_override', None)  # Override auto-calculation if set (N)
+        self.declare_parameter('base_thrust_override', -1.0)  # Override auto-calculation if set (N), -1.0 means not set
         self.declare_parameter('max_yaw_differential', 0.2)
         
         # Get parameters
@@ -113,7 +113,7 @@ class MaridAIController(Node):
         dest_y = self.get_parameter('destination_y').value
         
         # Determine destination coordinates
-        if dest_lat is not None and dest_lon is not None:
+        if dest_lat != -1.0 and dest_lon != -1.0:
             # Use GPS coordinates (preferred)
             x, y = self.lat_lon_to_local(dest_lat, dest_lon, self.datum_lat_, self.datum_lon_)
             self.destination_ = np.array([x, y])
@@ -121,7 +121,7 @@ class MaridAIController(Node):
             self.use_gps_coords_ = True
             self.get_logger().info(f'Using GPS coordinates: ({dest_lat:.6f}°, {dest_lon:.6f}°)')
             self.get_logger().info(f'Converted to local: ({x:.2f}, {y:.2f}) m')
-        elif dest_x is not None and dest_y is not None:
+        elif dest_x != -1.0 and dest_y != -1.0:
             # Use local coordinates (backward compatibility)
             self.destination_ = np.array([dest_x, dest_y])
             self.destination_gps_ = None
@@ -149,12 +149,12 @@ class MaridAIController(Node):
         thrust_to_weight_ratio = self.get_parameter('thrust_to_weight_ratio').value
         
         # Try to get aircraft mass and calculate max_thrust
-        if max_thrust_param is None or base_thrust_override is not None:
+        if max_thrust_param is None or base_thrust_override != -1.0:
             # Auto-calculate from mass
             self.aircraft_mass_ = self.get_aircraft_mass()
             
             if self.aircraft_mass_ is not None:
-                if base_thrust_override is not None:
+                if base_thrust_override != -1.0:
                     # Use override value directly
                     self.max_thrust_ = float(base_thrust_override)
                     self.get_logger().info(f'Aircraft mass: {self.aircraft_mass_:.2f} kg, Using override thrust: {self.max_thrust_:.2f} N')

@@ -209,7 +209,7 @@ class MaridGuidanceTracker(Node):
         base_thrust_override = self.get_parameter('base_thrust_override').value
         
         # Store override value (>= 0 means use fixed thrust, -1.0 means not set)
-        self.base_thrust_override_ = base_thrust_override if base_thrust_override >= 0 else None
+        self.base_thrust_override_ = base_thrust_override  # Store directly: -1.0 = not set, >= 0 = use this value
         
         # Treat -1.0 as "not set" (None equivalent)
         if max_thrust_param < 0 or base_thrust_override >= 0:
@@ -218,7 +218,7 @@ class MaridGuidanceTracker(Node):
                 self.aircraft_mass_ = aircraft_mass
                 if base_thrust_override >= 0:
                     self.max_thrust_ = float(base_thrust_override)  # Set max to override value
-                    if self.base_thrust_override_ is not None:
+                    if self.base_thrust_override_ >= 0:
                         self.get_logger().info(f'Fixed thrust mode enabled: {self.base_thrust_override_:.2f} N (overrides PID calculations)')
                 else:
                     g = 9.81
@@ -598,7 +598,7 @@ class MaridGuidanceTracker(Node):
         yaw_differential = np.clip(yaw_differential, -self.max_yaw_differential_, self.max_yaw_differential_)
         
         # If base_thrust_override is set, use it as fixed thrust (ignore all PID calculations)
-        if self.base_thrust_override_ is not None:
+        if self.base_thrust_override_ >= 0:
             total_thrust = float(self.base_thrust_override_)
             self.get_logger().debug(f'Using fixed thrust override: {total_thrust:.2f} N')
         else:

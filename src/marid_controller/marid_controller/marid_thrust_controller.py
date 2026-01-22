@@ -70,7 +70,7 @@ class MaridThrustController(Node):
         self.declare_parameter('min_thrust', 0.0)             # Minimum thrust (N)
         self.declare_parameter('max_thrust', 200.0)          # Maximum thrust (N) - can be None for auto-calculation
         self.declare_parameter('thrust_to_weight_ratio', 2.5)  # Thrust-to-weight ratio (if max_thrust is None)
-        self.declare_parameter('base_thrust_override', None)  # Override auto-calculation if set (N)
+        self.declare_parameter('base_thrust_override', -1.0)  # Override auto-calculation if set (N), -1.0 means not set
         self.declare_parameter('thrust_increment', 1.0)       # Thrust increment per keypress (N)
         self.declare_parameter('world_name', 'wt')            # Gazebo world name
         self.declare_parameter('model_name', 'marid')         # Model name
@@ -92,11 +92,11 @@ class MaridThrustController(Node):
         base_thrust_override = self.get_parameter('base_thrust_override').value
         thrust_to_weight_ratio = self.get_parameter('thrust_to_weight_ratio').value
         
-        if max_thrust_param is None or base_thrust_override is not None:
+        if max_thrust_param is None or base_thrust_override != -1.0:
             # Auto-calculate from mass
             aircraft_mass = self.get_aircraft_mass()
             if aircraft_mass is not None:
-                if base_thrust_override is not None:
+                if base_thrust_override != -1.0:
                     self.max_thrust_ = float(base_thrust_override)
                     self.get_logger().info(f'Thrust Controller: Aircraft mass: {aircraft_mass:.2f} kg, Using override thrust: {self.max_thrust_:.2f} N')
                 else:

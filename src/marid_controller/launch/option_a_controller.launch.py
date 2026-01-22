@@ -11,17 +11,49 @@ Architecture:
 """
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchArgument, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from ament_index_python.packages import get_package_share_directory
 import os
 
 def generate_launch_description():
-    # Shared waypoint parameters
-    destination_lat = 34.0522  # Los Angeles, CA
-    destination_lon = -118.2437
+    return LaunchDescription([
+        # Declare launch arguments for destination coordinates
+        DeclareLaunchArgument(
+            'destination_latitude',
+            default_value='34.0522',  # Los Angeles, CA
+            description='Destination latitude in degrees'
+        ),
+        DeclareLaunchArgument(
+            'destination_longitude',
+            default_value='-118.2437',  # Los Angeles, CA
+            description='Destination longitude in degrees'
+        ),
+        DeclareLaunchArgument(
+            'destination_x',
+            default_value='-1.0',  # -1.0 means not set, use GPS coordinates instead
+            description='Destination X coordinate in meters (local ENU frame). Use -1.0 to use GPS coordinates.'
+        ),
+        DeclareLaunchArgument(
+            'destination_y',
+            default_value='-1.0',  # -1.0 means not set, use GPS coordinates instead
+            description='Destination Y coordinate in meters (local ENU frame). Use -1.0 to use GPS coordinates.'
+        ),
+        # Use OpaqueFunction to access launch arguments and convert to floats
+        OpaqueFunction(function=launch_setup)
+    ])
+
+def launch_setup(context):
+    # Get launch argument values and convert to float
+    destination_lat = float(context.launch_configurations['destination_latitude'])
+    destination_lon = float(context.launch_configurations['destination_longitude'])
+    destination_x = float(context.launch_configurations.get('destination_x', '-1.0'))
+    destination_y = float(context.launch_configurations.get('destination_y', '-1.0'))
     datum_lat = 37.45397139527321  # SF Bay Area
     datum_lon = -122.16791304213365
+    
+    # Determine if local coordinates are set (both must be != -1.0)
+    use_local_coords = (destination_x != -1.0 and destination_y != -1.0)
     
     # Get launch file paths
     marid_localization_dir = get_package_share_directory('marid_localization')
@@ -38,7 +70,7 @@ def generate_launch_description():
         'controller.launch.py'
     )
     
-    return LaunchDescription([
+    return [
         # Include controller manager (spawns joint controllers)
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource([controller_launch])
@@ -91,9 +123,11 @@ def generate_launch_description():
                         'update_rate': 50.0,
                         'enable_ai': True,
                         'enable_pid_fallback': True,
-                        # Waypoint navigation - GPS coordinates
-                        'destination_latitude': destination_lat,
-                        'destination_longitude': destination_lon,
+                        # Waypoint navigation - use local coordinates if set, otherwise GPS
+                        'destination_latitude': destination_lat if not use_local_coords else -1.0,
+                        'destination_longitude': destination_lon if not use_local_coords else -1.0,
+                        'destination_x': destination_x,
+                        'destination_y': destination_y,
                         'datum_latitude': datum_lat,
                         'datum_longitude': datum_lon,
                         # Guidance parameters
@@ -146,11 +180,11 @@ def generate_launch_description():
                         'heading_rate_kp': 1.0,  # Still active for yaw control
                         'heading_rate_ki': 0.1,
                         'heading_rate_kd': 0.3,
-                        # Altitude control (disabled for fixed thrust test)
-                        'altitude_kp': 0.0,  # Disabled - not used when override is set
-                        'altitude_ki': 0.0,
-                        'altitude_kd': 0.0,
-                        'target_altitude': 5.0,  # Not used when override is set
+                        # Altitude control (re-enabled for altitude maintenance)
+                        'altitude_kp': 2.0,  # Re-enable for altitude maintenance
+                        'altitude_ki': 0.1,
+                        'altitude_kd': 0.5,
+                        'target_altitude': 5.0,
                         'use_sim_time': True,
                     }]
                 )
@@ -182,9 +216,11 @@ def generate_launch_description():
                         # Control surface limits
                         'wing_max_deflection': 0.5,
                         'tail_max_deflection': 0.5,
-                        # Waypoint navigation (for attitude control)
-                        'destination_latitude': destination_lat,
-                        'destination_longitude': destination_lon,
+                        # Waypoint navigation (for attitude control) - use local coordinates if set, otherwise GPS
+                        'destination_latitude': destination_lat if not use_local_coords else -1.0,
+                        'destination_longitude': destination_lon if not use_local_coords else -1.0,
+                        'destination_x': destination_x,
+                        'destination_y': destination_y,
                         'datum_latitude': datum_lat,
                         'datum_longitude': datum_lon,
                         'waypoint_tolerance': 2.0,
@@ -193,4 +229,4 @@ def generate_launch_description():
                 )
             ]
         ),
-    ])
+    ]

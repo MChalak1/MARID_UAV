@@ -95,10 +95,10 @@ class MaridAttitudeController(Node):
         self.declare_parameter('tail_max_deflection', 0.5)   # Max tail deflection (rad)
         
         # Waypoint navigation parameters
-        self.declare_parameter('destination_latitude', None)
-        self.declare_parameter('destination_longitude', None)
-        self.declare_parameter('destination_x', None)
-        self.declare_parameter('destination_y', None)
+        self.declare_parameter('destination_latitude', -1.0)
+        self.declare_parameter('destination_longitude', -1.0)
+        self.declare_parameter('destination_x', -1.0)
+        self.declare_parameter('destination_y', -1.0)
         self.declare_parameter('datum_latitude', 37.45397139527321)
         self.declare_parameter('datum_longitude', -122.16791304213365)
         self.declare_parameter('waypoint_tolerance', 2.0)
@@ -145,11 +145,11 @@ class MaridAttitudeController(Node):
         self.waypoint_tolerance_ = self.get_parameter('waypoint_tolerance').value
         
         # Determine destination
-        if dest_lat is not None and dest_lon is not None:
+        if dest_lat != -1.0 and dest_lon != -1.0:
             # Use GPS coordinates
             self.destination_ = self.lat_lon_to_local(dest_lat, dest_lon, self.datum_lat_, self.datum_lon_)
             self.get_logger().info(f'Destination (GPS): ({dest_lat:.6f}°, {dest_lon:.6f}°)')
-        elif dest_x is not None and dest_y is not None:
+        elif dest_x != -1.0 and dest_y != -1.0:
             # Use local coordinates
             self.destination_ = np.array([dest_x, dest_y])
             self.get_logger().info(f'Destination (local): ({dest_x:.2f}, {dest_y:.2f}) m')
@@ -290,12 +290,23 @@ class MaridAttitudeController(Node):
         direction = self.destination_ - current_pos
         distance = np.linalg.norm(direction)
         
+        # Safety check: avoid division issues when too close
+        if distance < 1e-6:
+            return 0.0, 0.0, self.current_yaw_
+        
         if distance < self.waypoint_tolerance_:
             # Waypoint reached - maintain level flight
             return 0.0, 0.0, self.current_yaw_
         
         # Desired heading to waypoint
+        # atan2(y, x) = atan2(north, east) gives angle from East axis (Gazebo/ROS convention)
+        # 0°=East, 90°=North, 180°=West, -90°=South
         desired_yaw = math.atan2(direction[1], direction[0])
+        
+        # Safety check: ensure desired_yaw is valid
+        if not np.isfinite(desired_yaw):
+            self.get_logger().warn('Invalid desired_yaw (NaN/inf), using current yaw')
+            desired_yaw = self.current_yaw_
         
         # Compute desired roll for coordinated turn (bank angle)
         # Use a simple proportional relationship: more heading error = more bank
@@ -310,8 +321,11 @@ class MaridAttitudeController(Node):
         max_bank_angle = math.radians(30.0)
         desired_roll = np.clip(heading_error * 0.5, -max_bank_angle, max_bank_angle)
         
-        # Desired pitch (for now, maintain level flight - can be enhanced for altitude control)
-        desired_pitch = 0.0
+        # Desired pitch: maintain altitude during turns by pitching up slightly when banking
+        # More bank = more pitch needed to maintain altitude (compensate for lift loss in turns)
+        # Use a small pitch compensation proportional to roll angle
+        pitch_compensation_factor = 0.1  # Tune this (0.1 = 10% of roll angle)
+        desired_pitch = abs(desired_roll) * pitch_compensation_factor  # Pitch up during turns
         
         return desired_roll, desired_pitch, desired_yaw
     
@@ -322,6 +336,11 @@ class MaridAttitudeController(Node):
         
         # Compute desired attitude from waypoint
         desired_roll, desired_pitch, desired_yaw = self.compute_waypoint_commands()
+        
+        # Safety check: ensure all desired values are valid
+        if not (np.isfinite(desired_roll) and np.isfinite(desired_pitch) and np.isfinite(desired_yaw)):
+            self.get_logger().warn('Invalid desired attitude (NaN/inf), skipping control update')
+            return
         
         # Get current time
         current_time = self.get_clock().now().nanoseconds / 1e9
@@ -340,7 +359,7 @@ class MaridAttitudeController(Node):
         # Update PID controllers
         roll_command = self.roll_pid_.update(roll_error, current_time)
         pitch_command = self.pitch_pid_.update(pitch_error, current_time)
-        yaw_command = self.yaw_pid_.update(yaw_error, current_time)
+        yaw_command = -self.yaw_pid_.update(yaw_error, current_time)  # Invert sign to fix turning direction
         
         # Convert attitude commands to control surface deflections
         # Control surface mapping:
@@ -350,13 +369,13 @@ class MaridAttitudeController(Node):
         # Wing deflections:
         # - Symmetric deflection for pitch (both wings same direction)
         # - Differential deflection for roll (opposite directions)
-        left_wing_deflection = pitch_command - roll_command  # Negative roll = left wing up
-        right_wing_deflection = pitch_command + roll_command  # Positive roll = right wing up
+        left_wing_deflection = pitch_command + roll_command  # Positive roll = left wing up (right bank)
+        right_wing_deflection = pitch_command - roll_command  # Positive roll = right wing down (right bank)
         
         # Tail deflections:
         # - Differential deflection for yaw (opposite directions)
         # - Symmetric deflection for pitch assist (both same direction)
-        tail_pitch_assist = pitch_command * 0.3  # 30% pitch assist from tail
+        tail_pitch_assist = pitch_command * 0.5  # 50% pitch assist from tail (increased for better altitude control)
         left_tail_deflection = tail_pitch_assist - yaw_command  # Negative yaw = left tail up
         right_tail_deflection = tail_pitch_assist + yaw_command  # Positive yaw = right tail up
         

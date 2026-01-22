@@ -87,10 +87,10 @@ class MaridAIGuidance(Node):
         self.declare_parameter('enable_pid_fallback', True)
         
         # Waypoint navigation parameters
-        self.declare_parameter('destination_latitude', None)
-        self.declare_parameter('destination_longitude', None)
-        self.declare_parameter('destination_x', None)
-        self.declare_parameter('destination_y', None)
+        self.declare_parameter('destination_latitude', -1.0)
+        self.declare_parameter('destination_longitude', -1.0)
+        self.declare_parameter('destination_x', -1.0)
+        self.declare_parameter('destination_y', -1.0)
         self.declare_parameter('datum_latitude', 37.45397139527321)
         self.declare_parameter('datum_longitude', -122.16791304213365)
         
@@ -124,13 +124,13 @@ class MaridAIGuidance(Node):
         dest_x = self.get_parameter('destination_x').value
         dest_y = self.get_parameter('destination_y').value
         
-        if dest_lat is not None and dest_lon is not None:
+        if dest_lat != -1.0 and dest_lon != -1.0:
             x, y = self.lat_lon_to_local(dest_lat, dest_lon, self.datum_lat_, self.datum_lon_)
             self.destination_ = np.array([x, y])
             self.destination_gps_ = (dest_lat, dest_lon)
             self.use_gps_coords_ = True
             self.get_logger().info(f'Using GPS coordinates: ({dest_lat:.6f}°, {dest_lon:.6f}°) → local: ({x:.2f}, {y:.2f}) m')
-        elif dest_x is not None and dest_y is not None:
+        elif dest_x != -1.0 and dest_y != -1.0:
             self.destination_ = np.array([dest_x, dest_y])
             self.destination_gps_ = None
             self.use_gps_coords_ = False
@@ -321,10 +321,23 @@ class MaridAIGuidance(Node):
         direction = self.destination_ - current_pos
         distance = np.linalg.norm(direction)
         
+        # Safety check: avoid division issues when too close
+        if distance < 1e-6:
+            return None, distance
+        
         if distance < self.waypoint_tolerance_:
             return None, distance
         
+        # Desired heading to waypoint
+        # atan2(y, x) = atan2(north, east) gives angle from East axis (Gazebo/ROS convention)
+        # 0°=East, 90°=North, 180°=West, -90°=South
         desired_heading = math.atan2(direction[1], direction[0])
+        
+        # Safety check: ensure desired_heading is valid
+        if not np.isfinite(desired_heading):
+            self.get_logger().warn('Invalid desired_heading (NaN/inf), returning None')
+            return None, distance
+        
         return desired_heading, distance
     
     def compute_pid_guidance(self, state):
