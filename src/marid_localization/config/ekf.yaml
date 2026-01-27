@@ -69,22 +69,21 @@ ekf_filter_node_odom:
     odom0_pose_nom: 0.01  # Position noise (m²) - very low for ground truth
     odom0_twist_nom: 0.1  # Velocity noise (m²/s²) - low for ground truth
     
-    # IMU-based odometry removed - redundant with primary sources
-    # /marid/odom was redundant because:
-    # - Z position: already provided by /gazebo/odom (primary) and /barometer/altitude (backup)
-    # - Orientation: already provided by /imu_ekf (primary)
-    # - Z velocity: already provided by /gazebo/odom (primary)
-    # odom1: /marid/odom
-    # odom1_config: [false, false, true,    # Only use Z position from IMU (X/Y are unreliable)
-    #                true,  true,  true,    # Use orientation (will be refined by IMU)
-    #                false, false, true,    # Only use Z velocity
-    #                false, false, false,
-    #                false, false, false]
-    # odom1_differential: false
-    # odom1_relative: false
-    # odom1_queue_size: 10
-    # odom1_pose_rejection_threshold: 100.0
-    # odom1_twist_rejection_threshold: 50.0
+    # FAST-LIO LiDAR-Inertial Odometry (from 3D LIDAR + IMU)
+    odom1: /Odometry  # FAST-LIO publishes to /Odometry topic
+    odom1_config: [true,  true,  true,    # Use X, Y, Z position from LiDAR odometry
+                   false, false, false,    # Don't use orientation (use IMU instead)
+                   true,  true,  true,     # Use X, Y, Z velocities
+                   false, false, false,
+                   false, false, false]
+    odom1_differential: false
+    odom1_relative: false
+    odom1_queue_size: 10
+    odom1_pose_rejection_threshold: 10.0
+    odom1_twist_rejection_threshold: 5.0
+    # LiDAR odometry covariance (good accuracy, better than GPS)
+    odom1_pose_nom: 0.05  # Position noise (m²) - good for LiDAR odometry
+    odom1_twist_nom: 0.15  # Velocity noise (m²/s²)
     
     # Process noise covariance (tune these based on your sensor quality)
     # Order: x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az

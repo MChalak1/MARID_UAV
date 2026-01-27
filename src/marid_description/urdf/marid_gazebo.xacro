@@ -355,6 +355,46 @@
       </sensor>
     </gazebo>
 
+    <!-- 3D LIDAR Sensor -->
+    <gazebo reference="lidar_link">
+      <sensor name="lidar" type="gpu_lidar">
+        <always_on>true</always_on>
+        <update_rate>10</update_rate>  <!-- 10 Hz for 3D LIDAR (more data to process) -->
+        <visualize>true</visualize>
+        <topic>/lidar/scan</topic>
+        <gz_frame_id>lidar_link</gz_frame_id>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>360</samples>  <!-- 360 degrees horizontal scan -->
+              <resolution>1.0</resolution>
+              <min_angle>-3.14159</min_angle>  <!-- -180 degrees -->
+              <max_angle>3.14159</max_angle>   <!-- +180 degrees -->
+            </horizontal>
+            <vertical>
+              <samples>16</samples>  <!-- 16 vertical scan lines for 3D -->
+              <resolution>1.0</resolution>
+              <min_angle>-0.2618</min_angle>  <!-- -15 degrees down -->
+              <max_angle>0.2618</max_angle>   <!-- +15 degrees up -->
+            </vertical>
+          </scan>
+          <range>
+            <min>0.1</min>   <!-- 10 cm minimum range -->
+            <max>100.0</max> <!-- 100 m maximum range -->
+            <resolution>0.01</resolution>  <!-- 1 cm resolution -->
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.01</stddev>  <!-- 1 cm standard deviation -->
+          </noise>
+        </ray>
+        <plugin filename="gz-sim-lidar-system" name="gz::sim::systems::Lidar">
+          <topic>/lidar/scan</topic>
+        </plugin>
+      </sensor>
+    </gazebo>
+
     <!-- Optional: Magnetometer for heading -->
     <gazebo reference="imu_link">
       <sensor name="magnetometer" type="magnetometer">

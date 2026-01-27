@@ -280,6 +280,37 @@
     <origin xyz="0 0.05 0.08" rpy="0 0 0"/>
   </joint>
 
+  <!-- LIDAR Sensor Link -->
+  <link name="lidar_link">
+    <inertial>
+      <mass value="0.1"/>  <!-- Typical LIDAR weight -->
+      <origin xyz="0 0 0"/>
+      <inertia ixx="1e-5" iyy="1e-5" izz="1e-5" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.05" radius="0.03"/>  <!-- Small cylinder to represent LIDAR -->
+      </geometry>
+      <material name="lidar_red">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.05" radius="0.03"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="lidar_link"/>
+    <!-- Mount LIDAR on front of drone, pointing forward -->
+    <origin xyz="0 0.2 0.05" rpy="0 0 0"/>  <!-- Forward position, slightly elevated -->
+  </joint>
+
   <link name="pitot_link">
     <inertial>
       <mass value="0.005"/>
