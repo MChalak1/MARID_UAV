@@ -111,6 +111,33 @@ def generate_launch_description():
                 'base_frame_id': 'base_link_front',
                 'publish_tf': False,  # EKF handles TF
                 'use_sim_time': True,
+                'airspeed_topic': '/airspeed/velocity',  # Use converted airspeed topic
+            }]
+        ),
+        
+        # Airspeed converter - converts gz.msgs.AirSpeed to std_msgs/Float64
+        Node(
+            package='marid_localization',
+            executable='airspeed_converter.py',
+            name='airspeed_converter',
+            output='screen',
+            parameters=[{
+                'gz_topic': '/airspeed',
+                'output_topic': '/airspeed/velocity',  # Changed to avoid conflict with FluidPressure publisher
+                'publish_rate': 50.0,
+            }]
+        ),
+        
+        # Wind estimator - uses EKF odometry + pitot airspeed to estimate 3D wind
+        Node(
+            package='marid_localization',
+            executable='wind_estimator.py',
+            name='wind_estimator',
+            output='screen',
+            parameters=[{
+                'odom_topic': '/odometry/filtered/local',
+                'airspeed_topic': '/airspeed/velocity',  # Use converted airspeed topic
+                'wind_frame_id': 'odom',
             }]
         ),
         

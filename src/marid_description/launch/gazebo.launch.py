@@ -96,6 +96,7 @@ def generate_launch_description():
         "/model/marid/joint/tail_left_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
         "/model/marid/joint/tail_right_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
         "/lidar/scan@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
+        # Note: /airspeed is gz.msgs.AirSpeed, not Double. Use airspeed_converter.py node instead.
     ],
     output='screen'
     )

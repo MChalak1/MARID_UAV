@@ -56,13 +56,6 @@ def launch_setup(context):
     use_local_coords = (destination_x != -1.0 and destination_y != -1.0)
     
     # Get launch file paths
-    marid_localization_dir = get_package_share_directory('marid_localization')
-    localization_launch = os.path.join(
-        marid_localization_dir,
-        'launch',
-        'local_localization.launch.py'
-    )
-    
     marid_controller_dir = get_package_share_directory('marid_controller')
     controller_launch = os.path.join(
         marid_controller_dir,
@@ -75,11 +68,8 @@ def launch_setup(context):
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource([controller_launch])
         ),
-        
-        # Include localization stack (EKF, sensors, etc.)
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource([localization_launch])
-        ),
+        # Localization is launched by marid_description/launch/gazebo.launch.py
+        # to avoid duplicate nodes (EKF, wind_estimator, airspeed_converter, etc.).
         
         # Thrust Controller - applies forces to drone in Gazebo
         # Subscribes to /marid/thrust/total and /marid/yaw/differential from guidance tracker

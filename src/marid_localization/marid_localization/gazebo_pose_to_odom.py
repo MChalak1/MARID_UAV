@@ -6,6 +6,7 @@ Uses ros_gz_bridge to get model pose from Gazebo world state
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Float64
 import subprocess
 import os
 import re
@@ -22,22 +23,40 @@ class GazeboPoseToOdom(Node):
         self.declare_parameter('base_frame_id', 'base_link_front')
         self.declare_parameter('publish_rate', 50.0)
         self.declare_parameter('use_gz_model_command', True)  # Use gz model command as fallback
+        self.declare_parameter('airspeed_topic', '/airspeed/velocity')  # Airspeed topic from pitot tube (converted)
         
         self.model_name_ = self.get_parameter('model_name').value
         self.odom_frame_id_ = self.get_parameter('odom_frame_id').value
         self.base_frame_id_ = self.get_parameter('base_frame_id').value
         self.publish_rate_ = self.get_parameter('publish_rate').value
         self.use_gz_model_ = self.get_parameter('use_gz_model_command').value
+        self.airspeed_topic_ = self.get_parameter('airspeed_topic').value
         
         # State
         self.last_position_ = None
         self.last_time_ = None
         self.pose_received_ = False
+        self.airspeed_ = None  # Airspeed from pitot tube (m/s)
         
         # Publisher
         self.odom_pub_ = self.create_publisher(
             Odometry,
             '/gazebo/odom',
+            10
+        )
+        
+        # Speed publishers
+        self.speed_total_pub_ = self.create_publisher(Float64, '/gazebo/speed/total', 10)
+        self.speed_horizontal_pub_ = self.create_publisher(Float64, '/gazebo/speed/horizontal', 10)
+        self.speed_vertical_pub_ = self.create_publisher(Float64, '/gazebo/speed/vertical', 10)
+        self.airspeed_pub_ = self.create_publisher(Float64, '/gazebo/speed/airspeed', 10)
+        self.wind_speed_pub_ = self.create_publisher(Float64, '/gazebo/speed/wind', 10)
+        
+        # Airspeed subscriber (from pitot tube sensor)
+        self.airspeed_sub_ = self.create_subscription(
+            Float64,
+            self.airspeed_topic_,
+            self.airspeed_callback,
             10
         )
         
@@ -47,6 +66,11 @@ class GazeboPoseToOdom(Node):
         
         self.get_logger().info(f'Gazebo Pose to Odometry converter initialized for model: {self.model_name_}')
         self.get_logger().info('Using gz model command to query pose...')
+        self.get_logger().info(f'Subscribing to airspeed topic: {self.airspeed_topic_}')
+    
+    def airspeed_callback(self, msg: Float64):
+        """Callback for airspeed from pitot tube sensor"""
+        self.airspeed_ = msg.data
     
     def query_pose_using_gz_model(self):
         """Query model pose using gz model command"""
@@ -264,6 +288,47 @@ class GazeboPoseToOdom(Node):
             
             odom_msg.header.stamp = now.to_msg()
             self.odom_pub_.publish(odom_msg)
+            
+            # Calculate and publish speeds
+            vx = odom_msg.twist.twist.linear.x
+            vy = odom_msg.twist.twist.linear.y
+            vz = odom_msg.twist.twist.linear.z
+            
+            # Total speed (scalar magnitude)
+            speed_total = math.sqrt(vx**2 + vy**2 + vz**2)
+            
+            # Horizontal speed (xy plane)
+            speed_horizontal = math.sqrt(vx**2 + vy**2)
+            
+            # Vertical speed (absolute value of z component)
+            speed_vertical = abs(vz)
+            
+            # Publish ground speeds
+            speed_total_msg = Float64()
+            speed_total_msg.data = speed_total
+            self.speed_total_pub_.publish(speed_total_msg)
+            
+            speed_horizontal_msg = Float64()
+            speed_horizontal_msg.data = speed_horizontal
+            self.speed_horizontal_pub_.publish(speed_horizontal_msg)
+            
+            speed_vertical_msg = Float64()
+            speed_vertical_msg.data = speed_vertical
+            self.speed_vertical_pub_.publish(speed_vertical_msg)
+            
+            # Publish airspeed (if available)
+            if self.airspeed_ is not None:
+                airspeed_msg = Float64()
+                airspeed_msg.data = self.airspeed_
+                self.airspeed_pub_.publish(airspeed_msg)
+                
+                # Estimate wind speed: wind = ground_speed - airspeed
+                # For horizontal wind, compare horizontal ground speed with airspeed
+                # Note: This is a simplified 1D estimate. Full 3D wind requires vector math
+                wind_speed_estimate = speed_horizontal - self.airspeed_
+                wind_speed_msg = Float64()
+                wind_speed_msg.data = wind_speed_estimate
+                self.wind_speed_pub_.publish(wind_speed_msg)
             
             # Update state
             self.last_position_ = [

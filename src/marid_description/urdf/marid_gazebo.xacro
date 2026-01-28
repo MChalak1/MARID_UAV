@@ -389,9 +389,10 @@
             <stddev>0.01</stddev>  <!-- 1 cm standard deviation -->
           </noise>
         </ray>
-        <plugin filename="gz-sim-lidar-system" name="gz::sim::systems::Lidar">
-          <topic>/lidar/scan</topic>
-        </plugin>
+        <!-- Gazebo Sim 8 uses the sensors system to publish lidar topics.
+             The older gz-sim-lidar-system plugin is not available on gz-sim8,
+             and causes: "Failed to load system plugin [gz-sim-lidar-system]".
+             Keeping the <topic> inside the <sensor> is sufficient. -->
       </sensor>
     </gazebo>
 
