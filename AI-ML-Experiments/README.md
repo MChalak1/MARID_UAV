@@ -12,7 +12,7 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 ## Roadmap
 - [x] **1D gradient descent** — implement 1d gradient descent optimization.
 - [x] **2D gradient descent** — extend to multi-variable optimization.
-- [ ] **Gradient ascent** — implement algorithm for gradient ascent.
+- [x] **Gradient ascent** — implement algorithm for gradient ascent. It's as simple as flipping (-) to (+) with renaming properly.
 - [ ] **MARID integration** — connect these methods to MARID’s perception, state estimation, or control pipeline.
 
 ## How to run
