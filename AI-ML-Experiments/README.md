@@ -9,9 +9,10 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 | `gradient_descent_optimization` | 1D gradient descent: \(f(x) = \cos(2\pi x) + x^2\), SymPy derivatives, stop at target gradient. |
 
 ## Roadmap
-
-- **2D gradient descent** — extend to multi-variable optimization.
-- **MARID integration** — connect these methods to MARID’s perception, state estimation, or control pipeline.
+- [x] **1D gradient descent** — implement 1d gradient descent optimization.
+- [x] **2D gradient descent** — extend to multi-variable optimization.
+- [ ] **Gradient ascent** — implement algorithm for gradient ascent.
+- [ ] **MARID integration** — connect these methods to MARID’s perception, state estimation, or control pipeline.
 
 ## How to run
 
