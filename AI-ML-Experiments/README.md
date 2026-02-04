@@ -7,6 +7,7 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 | Item | Description |
 |------|-------------|
 | `gradient_descent_optimization` | 1D gradient descent: \(f(x) = \cos(2\pi x) + x^2\), SymPy derivatives, stop at target gradient. |
+| `gradient_descent_2D`           | 2D gradient descent:  f(x,y) and g(x,y), partial derivatives, trajectory on heatmap.            |
 
 ## Roadmap
 - [x] **1D gradient descent** — implement 1d gradient descent optimization.
