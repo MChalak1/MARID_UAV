@@ -24,8 +24,12 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 
 
 
-![Function 3D plot]
+  -------------------------------------------------------------------------------
 <img width="506" height="437" alt="image" src="https://github.com/user-attachments/assets/9298a475-64f8-4054-bf4d-5880b9d77eea" />
-
-![Trajectory on Heatmap]
 <img width="652" height="546" alt="image" src="https://github.com/user-attachments/assets/885df2bd-c67c-4f40-911e-8937aeba1bfb" />
+
+---------------------------------------------------------------------------------
+<img width="472" height="417" alt="image" src="https://github.com/user-attachments/assets/5a6ac62f-3c10-477b-b0be-22ec72319606" />
+<img width="647" height="541" alt="image" src="https://github.com/user-attachments/assets/e3565d51-46e3-43f4-8d09-d564e205eaf2" />
+
+
