@@ -21,3 +21,11 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 - **Script:** `python gradient_descent_optimization.py` (if using the `.py` version).
 
 **Dependencies:** `numpy`, `matplotlib`, `sympy` (and for the notebook: `ipython`, `matplotlib-inline`).
+
+
+
+![Function 3D plot]
+<img width="506" height="437" alt="image" src="https://github.com/user-attachments/assets/9298a475-64f8-4054-bf4d-5880b9d77eea" />
+
+![Trajectory on Heatmap]
+<img width="652" height="546" alt="image" src="https://github.com/user-attachments/assets/885df2bd-c67c-4f40-911e-8937aeba1bfb" />
