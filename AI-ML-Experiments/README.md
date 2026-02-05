@@ -8,7 +8,7 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 |------|-------------|
 | `gradient_descent_1D` | 1D gradient descent: f(x) = cos(2πx) + x², SymPy derivatives, stop at target gradient. |
 | `gradient_descent_2D` | 2D gradient descent: f(x,y) and g(x,y), partial derivatives, trajectory on heatmap. |
-|`gradient_descent_2D_refractored`|2D gradient refactored version using reusable functions. |
+| `gradient_descent_2D_refractored` | 2D gradient refactored version using reusable functions. |
 
 ## Roadmap
 
