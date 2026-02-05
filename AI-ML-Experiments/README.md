@@ -13,6 +13,7 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 
 - [x] **1D gradient descent/ascent** — 1-variable optimization (done).
 - [x] **2D gradient descent/ascent** — multi-variable optimization (done).
+- [ ] **2D gradient descent refactored**: refactored version using a reusable run_gradient function, with cleaner convergence handling.
 - [ ] **Parametric Experiments** — running parametric experiments on Gradient Descent
 - [ ] **Dynamic Learning Rate** — Applying Dynamic Learning Rate
 - [ ] **MARID integration** — connect these methods to MARID's perception, state estimation, or control pipeline.
