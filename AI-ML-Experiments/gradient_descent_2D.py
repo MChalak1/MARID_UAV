@@ -1,9 +1,9 @@
+# Gradient Descent/Ascent
+
 # Importing Libraries
 import numpy as np
 import matplotlib.pyplot as plt
-
 import sympy as sym
-import math
 from IPython import display as dp
 import matplotlib_inline.backend_inline
 matplotlib_inline.backend_inline.set_matplotlib_formats('svg')
@@ -52,8 +52,12 @@ dgx = sym.lambdify((x,y),dgx_sym)
 dgy = sym.lambdify((x,y),dgy_sym)
 
 
-# Plotting the functions using 4 subplots
+## Parameters to be used later in the algorithm
+# Introducing Algorithm tolerance
+tol = 0.00001
 
+
+## Plotting the functions using 4 subplots
 # Domain Bounds
 domain_bounds = [-5, 5]
 x_range = np.linspace(-5,5,201)
@@ -103,11 +107,16 @@ training_epochs = 1000
 # Gradient Descent
 trajectory = np.zeros((training_epochs,2))
 
+# Counting Trajectory slots used
+slot = 0
+
 for i in range(training_epochs):
   grad = np.array([ dfx(localmin[0],localmin[1]),
                   dfy(localmin[0],localmin[1])
                   ])
   localmin = localmin - learning_rate*grad
+  trajectory[i,:] = localmin
+  slot +=1
 
   # Adding a break if the function increases indefinitely
   if (localmin[0] < domain_bounds[0] or localmin[0] > domain_bounds[1] or
@@ -115,7 +124,10 @@ for i in range(training_epochs):
         print(f"Warning: Trajectory left domain at iteration {i}")
         break
 
-  trajectory[i,:] = localmin
+  # Adding a break in case convergence occues at local extremum
+  if np.linalg.norm(grad) < tol:
+      print(f"Converged at iteration {i}, gradient norm={np.linalg.norm(grad):.2e}")
+      break
 
 print(localmin)
 print(startpnt)
@@ -126,7 +138,7 @@ plt.imshow(fxy(plot_x, plot_y), extent=[x_range[0], x_range[-1], y_range[0], y_r
             vmin=-5, vmax=5, origin='lower', cmap='viridis')
 plt.plot(startpnt[0], startpnt[1],'bs')
 plt.plot(localmin[0], localmin[1],'ro')
-plt.plot(trajectory[:,0], trajectory[:,1], 'r-')
+plt.plot(trajectory[:slot,0], trajectory[:slot,1], 'r-')
 plt.legend(['Starting Point', 'Local Minimum', 'Gradient Descent Trajectory'])
 plt.colorbar()
 plt.show()
@@ -144,11 +156,17 @@ training_epochs = 1000
 # Gradient Descent
 trajectory = np.zeros((training_epochs,2))
 
+# Counting Trajectory slots used
+slot = 0
+
+
 for i in range(training_epochs):
   grad = np.array([ dgx(localmin[0],localmin[1]),
                   dgy(localmin[0],localmin[1])
                   ])
   localmin = localmin - learning_rate*grad
+  trajectory[i,:] = localmin
+  slot +=1
 
   # Adding a break if the function increases indefinitely
   if (localmin[0] < domain_bounds[0] or localmin[0] > domain_bounds[1] or
@@ -156,7 +174,12 @@ for i in range(training_epochs):
         print(f"Warning: Trajectory left domain at iteration {i}")
         break
 
-  trajectory[i,:] = localmin
+  # Adding a break in case convergence occues at local extremum
+  if np.linalg.norm(grad) < tol:
+      print(f"Converged at iteration {i}, gradient norm={np.linalg.norm(grad):.2e}")
+      break
+
+  
 
 print(localmin)
 print(startpnt)
@@ -167,7 +190,7 @@ plt.imshow(gxy(plot_x, plot_y), extent=[x_range[0], x_range[-1], y_range[0], y_r
             vmin=-5, vmax=5, origin='lower', cmap='viridis')
 plt.plot(startpnt[0], startpnt[1],'bs')
 plt.plot(localmin[0], localmin[1],'ro')
-plt.plot(trajectory[:,0], trajectory[:,1], 'r-')
+plt.plot(trajectory[:slot,0], trajectory[:slot,1], 'r-')
 plt.legend(['Starting Point', 'Local Minimum', 'Gradient Descent Trajectory'])
 plt.colorbar()
 plt.show()
@@ -182,17 +205,21 @@ startpnt = localmax[:]              # Making a copy of the localmax
 learning_rate = 0.01
 training_epochs = 1000
 
-# Domain Bounds
-domain_bounds = [-5, 5]
 
 # Gradient Ascent
 trajectory = np.zeros((training_epochs,2))
+
+# Counting Trajectory slots used
+slot = 0
+
 
 for i in range(training_epochs):
   grad = np.array([ dfx(localmax[0],localmax[1]),
                   dfy(localmax[0],localmax[1])
                   ])
   localmax = localmax + learning_rate*grad
+  trajectory[i,:] = localmax
+  slot +=1
 
   # Adding a break if the function increases indefinitely
   if (localmax[0] < domain_bounds[0] or localmax[0] > domain_bounds[1] or
@@ -200,7 +227,11 @@ for i in range(training_epochs):
         print(f"Warning: Trajectory left domain at iteration {i}")
         break
 
-  trajectory[i,:] = localmax
+  # Adding a break in case convergence occues at local extremum
+  if np.linalg.norm(grad) < tol:
+      print(f"Converged at iteration {i}, gradient norm={np.linalg.norm(grad):.2e}")
+      break
+  
 
 print(localmax)
 print(startpnt)
@@ -211,8 +242,8 @@ plt.imshow(fxy(plot_x, plot_y), extent=[x_range[0], x_range[-1], y_range[0], y_r
             vmin=-5, vmax=5, origin='lower', cmap='viridis')
 plt.plot(startpnt[0], startpnt[1],'bs')
 plt.plot(localmax[0], localmax[1],'ro')
-plt.plot(trajectory[:,0], trajectory[:,1], 'r-')
-plt.legend(['Starting Point', 'Local Max', 'Gradient Descent Trajectory'])
+plt.plot(trajectory[:slot,0], trajectory[:slot,1], 'r-')
+plt.legend(['Starting Point', 'Local Max', 'Gradient Ascent Trajectory'])
 plt.colorbar()
 plt.show()
 
@@ -230,11 +261,17 @@ training_epochs = 1000
 # Gradient Ascent
 trajectory = np.zeros((training_epochs,2))
 
+# Counting Trajectory slots used
+slot = 0
+
+
 for i in range(training_epochs):
   grad = np.array([ dgx(localmax[0],localmax[1]),
                   dgy(localmax[0],localmax[1])
                   ])
   localmax = localmax + learning_rate*grad
+  trajectory[i,:] = localmax
+  slot +=1
 
   # Adding a break if the function increases indefinitely
   if (localmax[0] < domain_bounds[0] or localmax[0] > domain_bounds[1] or
@@ -242,7 +279,12 @@ for i in range(training_epochs):
         print(f"Warning: Trajectory left domain at iteration {i}")
         break
 
-  trajectory[i,:] = localmax
+  # Adding a break in case convergence occues at local extremum
+  if np.linalg.norm(grad) < tol:
+      print(f"Converged at iteration {i}, gradient norm={np.linalg.norm(grad):.2e}")
+      break
+
+  
 
 print(localmax)
 print(startpnt)
@@ -253,7 +295,7 @@ plt.imshow(gxy(plot_x, plot_y), extent=[x_range[0], x_range[-1], y_range[0], y_r
             vmin=-5, vmax=5, origin='lower', cmap='viridis')
 plt.plot(startpnt[0], startpnt[1],'bs')
 plt.plot(localmax[0], localmax[1],'ro')
-plt.plot(trajectory[:,0], trajectory[:,1], 'r-')
-plt.legend(['Starting Point', 'Local Max', 'Gradient Descent Trajectory'])
+plt.plot(trajectory[:slot,0], trajectory[:slot,1], 'r-') # Modified to start plotting from index 1
+plt.legend(['Starting Point', 'Local Max', 'Gradient Ascent Trajectory'])
 plt.colorbar()
 plt.show()
