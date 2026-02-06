@@ -42,6 +42,17 @@ This repository contains implementations and experiments exploring gradient desc
   - Low learning rates require more epochs
   - Starting location determines which minimum is found
   - Optimal learning rate range identified from heatmap
+ 
+ ### `parametric_experiments_1D.py` 
+- **Purpose**: Compare constant vs adaptive learning rate schedules on 1D gradient descent from a single run
+- **Features**:
+  - **Basic GD**: Fixed learning rate with trajectory and derivative plots
+  - **Step & exponential decay**: Decay every 50 steps using `lr = lr₀ * exp(-j / training_epochs)`
+  - **Gradient-based adaptive lr**: Learning rate proportional to |gradient| with cap (e.g. 2× base lr) for stability
+  - **Time-based linear decay**: Linear schedule from initial lr down to 0 over training epochs
+  - **Comparison**: One run from the same starting point for constant lr and all three schedules; plots for parameter trajectory, derivative, and learning rate
+- **Key Results**: Same baseline (constant lr) vs step/exp decay, gradient-based, and time-based schedules; illustrates how schedule choice affects convergence and lr over time
+- **Note**: Builds on the basic 1D implementation with explicit lr scheduling and a single-run comparison for fair visualization
 
 ## Notes
 The mathematical foundation (calculus, optimization theory) underlying these implementations 
