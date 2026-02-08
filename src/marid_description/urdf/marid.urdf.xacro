@@ -415,4 +415,36 @@
     <dynamics damping="0.0" friction="0.0"/>  <!-- Zero damping and friction for reaction torque visibility -->
   </joint>
 
+
+    <!-- Camera link for perception / ML -->
+  <link name="camera_link">
+    <inertial>
+      <mass value="0.02"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.06 0.02"/>
+      </geometry>
+      <material name="camera_gray">
+        <color rgba="0.3 0.3 0.3 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.06 0.02"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="camera_link"/>
+    <!-- Nose mount, forward-looking -->
+    <origin xyz="0 0.35 0.02" rpy="0 0 0"/>
+  </joint>
+
 </robot>
