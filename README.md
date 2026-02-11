@@ -43,8 +43,11 @@ This structure mirrors real aerospace flight stacks and ensures safety, interpre
 - **Guidance-Level Learning (Option A)**
 - AI outputs *guidance commands* (e.g. desired heading rate and speed)
 - No direct neural control of actuators
-- **Data Logger**
-- Records state–guidance pairs during flight
+- **Pose-from-IMU+Altitude (EKF Augmentation)**
+- Learned model predicts pose from IMU + barometer to assist state estimation
+- **Data Loggers**
+- Pose estimator logger (IMU + altitude → pose for EKF training)
+- Data logger (state–guidance pairs for control learning)
 - **State Normalization**
 - Mean/std normalization for stable neural-network training
 - **Behavior Cloning Ready**
@@ -87,12 +90,13 @@ This is the **default and recommended architecture** for development, testing, a
 
 ### Control Architecture Overview
 
-## Control Architecture Overview
-
-### Option A (Primary — Guidance-Based)
+#### Option A (Primary — Guidance-Based)
 
 ```
-[Sensors / EKF]
+[Sensors: IMU, baro, GPS, ...]
+        ↓
+[State Estimation]
+ (EKF; optionally augmented by learned pose-from-IMU+altitude)
         ↓
 [AI Guidance Layer]
  (heading rate, speed)
@@ -104,7 +108,7 @@ This is the **default and recommended architecture** for development, testing, a
  (thrust, surfaces)
 ```
 
-### Option B (Legacy — Direct Control)
+#### Option B (Legacy — Direct Control)
 
 ```
 [Sensors / EKF]
@@ -132,8 +136,12 @@ EKF nodes, sensor adapters, GPS-to-local transformation utilities
 - AI guidance node (high-level targets only)
 - Attitude controller (control surfaces)
 - Thrust / speed controller
-- Data logger for ML training
 - Safety / failsafe supervisor
+
+- **`marid_logging`**  
+- Pose estimator logger (IMU + altitude → pose for EKF training)
+- Data logger (state–action pairs for control/guidance learning)
+- IMU logger (raw IMU to CSV for debugging)
 
 ---
 
@@ -220,17 +228,14 @@ This launches:
 
 ---
 
-### Optional: Data Logger for ML Training
+### Optional: Data Loggers for ML Training
 
-```bash
-ros2 run marid_logging marid_data_logger
-```
+| Goal | Command | Output |
+|------|---------|--------|
+| **Pose prediction for EKF** | `ros2 run marid_logging pose_estimator_logger` | `~/marid_ws/data/marid_pose_imu_altitude_*.npz` |
+| **Control/guidance learning** | `ros2 run marid_logging marid_data_logger` | `~/marid_ws/data/marid_flight_data_*.npz` |
 
-Data is saved to:
-
-```
-~/marid_ws/data/marid_flight_data_*.npz
-```
+Requires Gazebo + localization running. See `marid_logging/README.md` for when to use which logger.
 
 ---
 
@@ -248,20 +253,22 @@ Data is saved to:
 
 ---
 
-## 🤖 ML Training Workflow (Option A)
+## 🤖 ML Training Workflows
 
-### Phase 1 — Data Collection
+### Pose-from-IMU+Altitude (EKF Augmentation)
 
-1. Run the full system with classical control enabled
-2. Fly multiple waypoint scenarios
-3. Log state → guidance targets
-4. Collect ~30–60 minutes of flight data
+Train a model to predict pose from IMU + altitude, to assist the EKF.
+
+1. **Data collection:** Run `pose_estimator_logger` during simulation (Gazebo + localization).
+2. **Train:** Learn `f(IMU, altitude) → pose` from `marid_pose_imu_altitude_*.npz`.
+3. **Deploy:** Integrate model to augment EKF (future work).
 
 ---
 
-### Phase 2 — Behavior Cloning (Supervised Learning)
+### Guidance-Level Learning (Option A — Behavior Cloning)
 
-1. **Compute Normalization**
+1. **Data collection:** Run full system with classical control; use `marid_data_logger` to log state → guidance targets.
+2. **Compute normalization**
 
 ```python
 from marid_controller.state_normalizer import StateNormalizer
@@ -269,25 +276,15 @@ import numpy as np
 
 data = np.load("marid_flight_data_chunk0000.npz")
 states = data["states"]      # (N, 20)
-targets = data["guidance"]   # (N, 2)
+targets = data["actions"]    # (N, 2) — or guidance if logger updated for Option A
 
 normalizer = StateNormalizer()
 normalizer.fit(states)
 normalizer.save("normalizer.json")
 ```
 
-2. **Train PyTorch Model**
-
-* Input: normalized 20-D state
-* Output: 2-D guidance targets
-  `(desired_heading_rate, desired_speed)`
-* Loss: Mean-Squared Error (MSE)
-
-3. **Deploy**
-
-* Load model + normalizer in guidance node
-* Enable AI guidance mode
-* Retain PID fallback for safety
+3. **Train:** Input normalized 20-D state → output 2-D guidance targets `(desired_heading_rate, desired_speed)`.
+4. **Deploy:** Load model in guidance node; retain PID fallback.
 
 ---
 
@@ -313,7 +310,8 @@ src/
 └── marid_logging/
     └── marid_logging/
         ├── imu_logger.py
-        └── marid_data_logger.py
+        ├── marid_data_logger.py
+        └── pose_estimator_logger.py
 
 ```
 
@@ -331,7 +329,7 @@ src/
   * Future: stacked states or recurrent policies
 * **Learning Scope**
 
-  * Presently guidance-only (Option A)
+  * Presently guidance-only (Option A) and pose-from-IMU+altitude (EKF augmentation)
   * Future research may explore lower-level learning under strict safety constraints
 
 ---
