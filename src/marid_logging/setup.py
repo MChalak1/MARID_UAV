@@ -18,6 +18,8 @@ setup(
     entry_points={
         'console_scripts': [
             'imu_logger = marid_logging.imu_logger:main',
+            'marid_data_logger = marid_logging.marid_data_logger:main',
+            'pose_estimator_logger = marid_logging.pose_estimator_logger:main',
         ],
     },
 )

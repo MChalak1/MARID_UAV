@@ -223,7 +223,7 @@ This launches:
 ### Optional: Data Logger for ML Training
 
 ```bash
-ros2 run marid_controller marid_data_logger
+ros2 run marid_logging marid_data_logger
 ```
 
 Data is saved to:
@@ -296,7 +296,7 @@ normalizer.save("normalizer.json")
 ```
 MARID_UAV/
 src/
-└── marid_controller/
+├── marid_controller/
     ├── launch/
     ├── marid_controller/
     │   ├── marid_ai_guidance.py
@@ -304,13 +304,16 @@ src/
     │   ├── marid_ai_controller.py        (legacy Option B)
     │   ├── marid_attitude_controller.py
     │   ├── marid_thrust_controller.py
-    │   ├── marid_data_logger.py
     │   ├── marid_safety_node.py
     │   ├── ai_model.py
     │   └── state_normalizer.py
     ├── package.xml
     ├── setup.py
     └── CMakeLists.txt
+└── marid_logging/
+    └── marid_logging/
+        ├── imu_logger.py
+        └── marid_data_logger.py
 
 ```
 

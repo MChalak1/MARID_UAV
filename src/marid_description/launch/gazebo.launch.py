@@ -43,7 +43,6 @@ def generate_launch_description():
 
 
 
-
     world_path = os.path.join(get_package_share_directory("marid_description"),
                           "worlds", "wt.sdf")
 
@@ -122,5 +121,5 @@ def generate_launch_description():
         gazebo,
         gz_spawn_entity,
         imu_bridge,
-        localization_launch
+        localization_launch,
     ])

@@ -16,7 +16,8 @@ from datetime import datetime
 from pathlib import Path
 import time
 
-# Import state vector builder (reuse from AI controller)
+# State vector dimension (20-D extended state for Option A)
+# Matches marid_controller.ai_model.STATE_DIM when available
 try:
     from marid_controller.marid_controller.ai_model import STATE_DIM
 except ImportError:
@@ -32,7 +33,7 @@ class MaridDataLogger(Node):
         - /imu_ekf (state: angular velocities)
         - /barometer/altitude (state: altitude)
         - /marid/thrust/total (action: PID thrust output)
-        - /marid/yaw/differential (action: PID yaw differential output)
+        - /marid/thrust/yaw_differential (action: PID yaw differential output)
     
     Logs to .npz files in chunks for efficient storage and training.
     """
