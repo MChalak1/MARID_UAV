@@ -272,9 +272,10 @@ plt.grid()
 
 
 ## Observations:
-
+"""
 - As |slope| increases, the mean final loss also increases. This is expected because the target values y have larger variance (bigger scale) for larger slopes, and MSE is in absolute units.
 - At the same time, the mean correlation between y and y_hat is high for most non‑zero slopes, showing that the model is capturing the linear relationship well despite the higher absolute loss.
 - Around slope = 0, the correlation drops toward 0 because y is dominated by noise and carries almost no information about x; in that regime there is essentially no learnable linear structure.
 - This illustrates that raw loss values are not directly comparable across different target scales; to compare model quality fairly, either normalize the data or look at scale‑invariant measures like correlation or relative error.
+"""
 

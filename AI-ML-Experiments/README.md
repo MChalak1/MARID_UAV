@@ -11,7 +11,8 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 | `gradient_descent_2D_refactored` | 2D gradient refactored version using reusable functions. |
 | `parametric_experiments_1D` | 1D gradient descent parameter sensitivity experiments & dnamic learning rate. |
 | `pytorch_ANN_1D` | PyTorch 1D regression demo: one MLP trained on linear, quadratic, and damped-sinusoid targets with per-task weight reset, loss curves, and correlation plots. |
-| `pytorch_parametric_regression.py` | PyTorch parametric regression slope-sweep experiment |
+| `pytorch_parametric_regression` | PyTorch parametric regression slope-sweep experiment |
+| `pytorch_binary_classification` | PyTorch binary classification: two 2D clusters, ANN with BCE + Sigmoid, decision boundary and misclassification plot. |
 
 ## Roadmap
 
@@ -22,6 +23,9 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 - [x] **Dynamic Learning Rate** — Applying Dynamic Learning Rate (done).
 - [x] **PyTorch Implementation** — Using PyTorch to implement model training 1D (done).
 - [x] **PyTorch Parametric Expirementation** — Experimenting model behavior across different regression slopes (done).
+- [x] **PyTorch Binary Classification** — 2D cluster classification with BCE + Sigmoid (done).
+- [x] **IMU data logging** — Log IMU from simulation to CSV for ML/training (marid_logging package). (done)
+- [ ] **IMU → pose prediction** — Train ANN to predict pose (orientation) from raw IMU channels.
 - [ ] **MARID integration** — Connect these methods to MARID's perception, state estimation, or control pipeline.
 
 ## How to run
