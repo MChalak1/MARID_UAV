@@ -45,8 +45,14 @@ This structure mirrors real aerospace flight stacks and ensures safety, interpre
 - No direct neural control of actuators
 - **Pose-from-IMU+Altitude (EKF Augmentation)**
 - Learned model predicts pose from IMU + barometer to assist state estimation
+- **IMU-Based Position Estimation (Physics + ML)** *(In Development)*
+- Hybrid approach combining physics-based double integration with ML corrections
+- Learns to filter noise, compensate bias drift, and correct integration errors from acceleration sequences
+- Enables GPS-denied navigation using only IMU data with known initial position
+- Uses LSTM/GRU sequence models to process temporal acceleration patterns
 - **Data Loggers**
 - Pose estimator logger (IMU + altitude → pose for EKF training)
+- IMU physics position logger *(In Development)* — acceleration sequences → position for GPS-denied navigation
 - Data logger (state–guidance pairs for control learning)
 - **State Normalization**
 - Mean/std normalization for stable neural-network training
@@ -140,6 +146,7 @@ EKF nodes, sensor adapters, GPS-to-local transformation utilities
 
 - **`marid_logging`**  
 - Pose estimator logger (IMU + altitude → pose for EKF training)
+- IMU physics position logger *(In Development)* — acceleration sequences → position
 - Data logger (state–action pairs for control/guidance learning)
 - IMU logger (raw IMU to CSV for debugging)
 
@@ -233,6 +240,7 @@ This launches:
 | Goal | Command | Output |
 |------|---------|--------|
 | **Pose prediction for EKF** | `ros2 run marid_logging pose_estimator_logger` | `~/marid_ws/data/marid_pose_imu_altitude_*.npz` |
+| **IMU position estimation** *(In Development)* | `ros2 run marid_logging imu_physics_position_logger` | `~/marid_ws/data/marid_imu_position_*.npz` |
 | **Control/guidance learning** | `ros2 run marid_logging marid_data_logger` | `~/marid_ws/data/marid_flight_data_*.npz` |
 
 Requires Gazebo + localization running. See `marid_logging/README.md` for when to use which logger.
@@ -262,6 +270,47 @@ Train a model to predict pose from IMU + altitude, to assist the EKF.
 1. **Data collection:** Run `pose_estimator_logger` during simulation (Gazebo + localization).
 2. **Train:** Learn `f(IMU, altitude) → pose` from `marid_pose_imu_altitude_*.npz`.
 3. **Deploy:** Integrate model to augment EKF (future work).
+
+---
+
+### IMU-Based Position Estimation (Physics-Augmented Learning) *(In Development)*
+
+Train a hybrid model that combines **physics-based integration** with **ML corrections** to estimate `[x, y, z]` position from IMU acceleration sequences.
+
+**Approach:**
+- **Physics Foundation:** Double-integrate acceleration → velocity → position
+- **ML Augmentation:** Learn corrections for noise filtering, bias drift, and integration errors
+- **Temporal Context:** Process acceleration sequences (50-200 timesteps) using LSTM/GRU
+
+**Workflow:**
+
+1. **Data collection:** *(Logger in development)* Log IMU acceleration sequences with ground-truth positions
+   ```bash
+   ros2 run marid_logging imu_physics_position_logger
+   ```
+   Planned output: `marid_imu_position_*.npz` with:
+   - Input: `(sequence_length, 10)` — `[ax, ay, az, gx, gy, gz, qx, qy, qz, qw]` over time window
+   - Target: `[x₀, y₀, z₀]` → `[x_final, y_final, z_final]` (initial + final positions)
+
+2. **Preprocessing:** Transform body-frame acceleration to world frame using orientation quaternions, remove gravity
+
+3. **Train:** Learn `f(accel_sequence, initial_pos) → final_pos` with physics-aware loss:
+   ```python
+   # Physics integration baseline
+   physics_pred = integrate_acceleration(accel_sequence, dt)
+   # ML corrections
+   ml_correction = model(accel_sequence)
+   # Combined prediction
+   predicted_pos = initial_pos + physics_pred + ml_correction
+   ```
+
+4. **Deploy:** Real-time position estimation node for GPS-denied navigation (requires periodic corrections from GPS/landmarks)
+
+**Benefits:**
+- Interpretable (physics provides baseline)
+- Data-efficient (leverages physics structure)
+- Handles drift through learned corrections
+- Enables navigation in GPS-denied environments
 
 ---
 
@@ -311,7 +360,8 @@ src/
     └── marid_logging/
         ├── imu_logger.py
         ├── marid_data_logger.py
-        └── pose_estimator_logger.py
+        ├── pose_estimator_logger.py
+        └── imu_physics_position_logger.py  (in development)
 
 ```
 
@@ -330,6 +380,7 @@ src/
 * **Learning Scope**
 
   * Presently guidance-only (Option A) and pose-from-IMU+altitude (EKF augmentation)
+  * **In Development:** IMU-based position estimation (physics + ML) for GPS-denied navigation
   * Future research may explore lower-level learning under strict safety constraints
 
 ---
