@@ -5,7 +5,7 @@ Collects IMU + altitude (inputs) and ground-truth pose (target) for training
 a learned pose-from-IMU+altitude model to assist the EKF.
 
 Input features (X):  IMU orientation, angular velocity, linear acceleration, altitude
-Target (y_real):     Ground-truth pose (x, y, z, roll, pitch, yaw) from Gazebo
+Target (y_real):     [z, roll, pitch, yaw] from Gazebo (4-D; x,y not observable from IMU+altitude)
 
 Subscribes to:
     - /imu_ekf          (sensor_msgs/Imu)
@@ -39,7 +39,7 @@ class PoseEstimatorLogger(Node):
     
     Logs:
         X: [qx, qy, qz, qw, gx, gy, gz, ax, ay, az, altitude]  (11-D input)
-        y: [x, y, z, roll, pitch, yaw]  (6-D ground-truth pose)
+        y: [z, roll, pitch, yaw]  (4-D; x,y not observable from IMU+altitude)
     """
     
     def __init__(self):
@@ -67,7 +67,7 @@ class PoseEstimatorLogger(Node):
         
         # Buffers
         self.imu_inputs_ = []   # (N, 11): [qx,qy,qz,qw, gx,gy,gz, ax,ay,az, altitude]
-        self.pose_targets_ = [] # (N, 6): [x,y,z, roll,pitch,yaw]
+        self.pose_targets_ = [] # (N, 4): [z, roll,pitch,yaw]
         
         # Latest messages (for nearest-neighbor sync)
         self.last_imu_ = None
@@ -129,14 +129,14 @@ class PoseEstimatorLogger(Node):
         ], dtype=np.float32)
     
     def _build_target(self):
-        """Build 6-D target: [x, y, z, roll, pitch, yaw]"""
+        """Build 4-D target: [z, roll, pitch, yaw] (x,y not observable from IMU+altitude)"""
         if self.last_odom_ is None:
             return None
         pos = self.last_odom_.pose.pose.position
         ori = self.last_odom_.pose.pose.orientation
         roll, pitch, yaw = quaternion_to_euler(ori.x, ori.y, ori.z, ori.w)
         return np.array([
-            pos.x, pos.y, pos.z,
+            pos.z,
             roll, pitch, yaw
         ], dtype=np.float32)
     
@@ -173,7 +173,7 @@ class PoseEstimatorLogger(Node):
             imu_inputs=inputs,
             pose_targets=targets,
             input_dim=11,
-            target_dim=6,
+            target_dim=4,
             num_samples=len(self.imu_inputs_)
         )
         elapsed = time.time() - self.start_time_

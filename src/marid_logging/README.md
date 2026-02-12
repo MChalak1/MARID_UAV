@@ -64,7 +64,7 @@ Data is saved to `~/marid_ws/data/marid_flight_data_*.npz` by default. See `mari
 Collects IMU + altitude (inputs) and ground-truth pose (target) for training a learned pose-from-IMU+altitude model to assist the EKF.
 
 - **Input (X):** IMU orientation, angular velocity, linear acceleration, altitude (11-D)
-- **Target (y_real):** Ground-truth pose x, y, z, roll, pitch, yaw from Gazebo (6-D)
+- **Target (y_real):** [z, roll, pitch, yaw] from Gazebo (4-D; x,y not observable from IMU+altitude)
 
 **Run:**
 
