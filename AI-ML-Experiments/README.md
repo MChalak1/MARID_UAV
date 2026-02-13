@@ -14,6 +14,8 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 | `pytorch_parametric_regression` | PyTorch parametric regression slope-sweep experiment |
 | `pytorch_binary_classification` | PyTorch binary classification: two 2D clusters, ANN with BCE + Sigmoid, decision boundary and misclassification plot. |
 | `ANN_learningrates_binary` | Parametric learning rate sweep + hidden units comparison (h=1,2,5) with meta-experiments. |
+| `ANN_multi_in_out` | PyTorch 3-class classification: three 2D Gaussian zones (upper-left, upper-right, bottom), 2→h→3 or 2→h→h→3, CrossEntropyLoss, parametric LR sweep + 50-run meta-experiment. |
+| `ANN_multi_in_out_iris` | PyTorch multi-output ANN on IRIS: 4 features → 3 species, 4→64→64→3, CrossEntropyLoss. |
 
 ## Roadmap
 
@@ -28,6 +30,8 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 - [x] **PyTorch Binary Classification: LR & Capacity Analysis** — Parametric LR sweep + hidden units comparison with meta-experiments (done).
 - [x] **IMU data logging** — Log IMU from simulation to CSV for ML/training (marid_logging package). (done)
 - [x] **Pose estimator data logging** — Log IMU + altitude → pose pairs for EKF training (pose_estimator_logger) (done).
+- [x] **Multi-in multi-out ANN (3-class zones)** — Synthetic 3-zone classification with LR sweep and meta-experiment (done).
+- [x] **Multi-in multi-out ANN (IRIS)** — IRIS 4→3 classification (done).
 - [ ] **IMU → pose prediction** — Train ANN to predict pose (orientation) from raw IMU channels.
 - [ ] **MARID integration** — Connect these methods to MARID's perception, state estimation, or control pipeline.
 
@@ -36,7 +40,7 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 - **Notebook:** Open the `.ipynb` in Jupyter or VS Code.
 - **Script:** `python gradient_descent_optimization.py` (if using the `.py` version).
 
-**Dependencies:** `numpy`, `matplotlib`, `sympy` (and for the notebook: `ipython`, `matplotlib-inline`).
+**Dependencies:** **Dependencies:** `numpy`, `matplotlib`, `sympy`, `torch` (and for notebooks: `ipython`, `matplotlib-inline`; for IRIS: `seaborn`).
 
 <img width="1337" height="473" alt="image" src="https://github.com/user-attachments/assets/a7f6d54c-febb-4729-8c74-73aa0990ff93" />
 
