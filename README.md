@@ -54,12 +54,19 @@ This structure mirrors real aerospace flight stacks and ensures safety, interpre
 - Pose estimator logger (IMU + altitude → pose for EKF training)
 - IMU physics position logger *(In Development)* — acceleration sequences → position for GPS-denied navigation
 - Data logger (state–guidance pairs for control learning)
+- **Multi-sensor fusion (planned)** — LIDAR and camera inputs for improved state prediction and GPS-free operation
 - **State Normalization**
 - Mean/std normalization for stable neural-network training
 - **Behavior Cloning Ready**
 - Supervised imitation learning from PID-generated guidance
 - **Safe Deployment**
 - PID fallback and state validation during runtime inference
+
+#### Training & deployment workflow (pose / GPS-free goal)
+- **Phase 1 (4-D):** Train a model on diverse sim data (multiple flights and scenarios) to predict z, roll, pitch, yaw from IMU + altitude. Validate and save weights. Data from `pose_estimator_logger`.
+- **Phase 2 (6-D):** Add x, y via sequence-based position (e.g. `imu_physics_position_logger`) or fused estimate; train on diverse sim data and save weights.
+- **Phase 3 (planned):** Fuse LIDAR and camera (e.g. LIDAR odometry, visual odometry) with IMU and learned pose for drift correction and long-duration GPS-free navigation.
+- **Goal:** A control architecture that can run without GPS by fusing IMU, barometer, learned pose, and (optionally) LIDAR and camera in the EKF.
 
 ---
 
