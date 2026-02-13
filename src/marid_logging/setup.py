@@ -20,6 +20,7 @@ setup(
             'imu_logger = marid_logging.imu_logger:main',
             'marid_data_logger = marid_logging.marid_data_logger:main',
             'pose_estimator_logger = marid_logging.pose_estimator_logger:main',
+            'imu_physics_position_logger = marid_logging.imu_physics_position_logger:main',
         ],
     },
 )
