@@ -40,8 +40,9 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 
 Feedforward net (11→256→256→4) trained on combined sim data; targets z, roll, pitch, yaw from Gazebo.
 
-![Phase 1 training curves](<img width="1390" height="789" alt="image" src="https://github.com/user-attachments/assets/c1df9f97-ceb7-46c4-9b60-74789b44004e" />
-)
+![Phase 1 training curves]
+<img width="1390" height="789" alt="image" src="https://github.com/user-attachments/assets/c1df9f97-ceb7-46c4-9b60-74789b44004e" />
+
 *Example run: Val MSE ≈ 0.19; per-output (z, roll, pitch, yaw): 0.600, 0.079, 0.034, 0.066.*
 
 **Observations:** Single-file runs gave lower val MSE; combined data (multiple runs) is harder. With dropout, train MSE can sit above val MSE. Orientation (roll, pitch, yaw) is typically better than z. Next: more flights and multiple seeds for mean±std.
