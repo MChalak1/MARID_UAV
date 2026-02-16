@@ -55,7 +55,8 @@ Feedforward net (11→256→256→4) trained on combined sim data; targets z, ro
 
 **Dependencies:** **Dependencies:** `numpy`, `matplotlib`, `sympy`, `torch` (and for notebooks: `ipython`, `matplotlib-inline`; for IRIS: `seaborn`).
 
-<img width="1337" height="473" alt="image" src="https://github.com/user-attachments/assets/a7f6d54c-febb-4729-8c74-73aa0990ff93" />
+<img width="1142" height="532" alt="image" src="https://github.com/user-attachments/assets/90b97200-72de-4bdb-8b9b-cbeabb60daad" />
+
 
 <img width="638" height="532" alt="image" src="https://github.com/user-attachments/assets/654e8894-82e3-4092-889c-68286ee7fa7b" /> <img width="642" height="522" alt="image" src="https://github.com/user-attachments/assets/4511e721-7ce5-428b-9c2e-6c2b24a3f110" />
 
