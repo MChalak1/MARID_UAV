@@ -8,7 +8,7 @@ import os
 
 def generate_launch_description():
     # Get package directory
-    pkg_dir = get_package_share_directory('marid_localization')  # Change this
+    pkg_dir = get_package_share_directory('marid_localization')  
 
     config_file = os.path.join(pkg_dir, 'config', 'ekf.yaml')
     navsat_config_file = os.path.join(pkg_dir, 'config', 'navsat_transform.yaml')

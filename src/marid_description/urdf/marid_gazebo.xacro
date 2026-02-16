@@ -540,8 +540,5 @@
           </xacro:unless>
       </gazebo>
 
-    <!-- Thruster plugin removed - it requires a joint (for rotating propellers) -->
-    <!-- For fixed-wing aircraft, we use ApplyLinkWrench plugin (already in world) -->
-    <!-- Force is applied via /world/wt/wrench/persistent topic with EntityWrench messages -->
 
 </robot>
