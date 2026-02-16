@@ -16,6 +16,7 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 | `ANN_learningrates_binary` | Parametric learning rate sweep + hidden units comparison (h=1,2,5) with meta-experiments. |
 | `ANN_multi_in_out` | PyTorch 3-class classification: three 2D Gaussian zones (upper-left, upper-right, bottom), 2→h→3 or 2→h→h→3, CrossEntropyLoss, parametric LR sweep + 50-run meta-experiment. |
 | `ANN_multi_in_out_iris` | PyTorch multi-output ANN on IRIS: 4 features → 3 species, 4→64→64→3, CrossEntropyLoss. |
+| `pose_from_imu_altitude_train` | Phase 1: Train 4-D pose (z, roll, pitch, yaw) from 11-D IMU+altitude. Notebook + script; local or Colab; 256+dropout+ReduceLROnPlateau. |
 
 ## Roadmap
 
@@ -32,13 +33,25 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 - [x] **Pose estimator data logging** — Log IMU + altitude → pose pairs for EKF training (pose_estimator_logger) (done).
 - [x] **Multi-in multi-out ANN (3-class zones)** — Synthetic 3-zone classification with LR sweep and meta-experiment (done).
 - [x] **Multi-in multi-out ANN (IRIS)** — IRIS 4→3 classification (done).
-- [ ] **IMU → pose prediction** — Train ANN to predict pose (orientation) from raw IMU channels.
+- [x] **Pose-from-IMU+Altitude (Phase 1)** — Train 4-D pose from IMU+altitude; notebook + script (done).
+- [ ] **Full 6-D pose (Phase 2)** — x, y, z + orientation from IMU sequences / fused estimate.
 - [ ] **MARID integration** — Connect these methods to MARID's perception, state estimation, or control pipeline.
+
+## Phase 1: Pose-from-IMU+Altitude results
+
+Feedforward net (11→256→256→4) trained on combined sim data; targets z, roll, pitch, yaw from Gazebo.
+
+![Phase 1 training curves](phase1_training_curves.png)
+
+*Example run: Val MSE ≈ 0.19; per-output (z, roll, pitch, yaw): 0.600, 0.079, 0.034, 0.066.*
+
+**Observations:** Single-file runs gave lower val MSE; combined data (multiple runs) is harder. With dropout, train MSE can sit above val MSE. Orientation (roll, pitch, yaw) is typically better than z. Next: more flights and multiple seeds for mean±std.
 
 ## How to run
 
 - **Notebook:** Open the `.ipynb` in Jupyter or VS Code.
 - **Script:** `python gradient_descent_optimization.py` (if using the `.py` version).
+- **Pose-from-IMU+Altitude (Phase 1):** Open `pose_from_imu_altitude_train.ipynb` or run `python pose_from_imu_altitude_train.py` (set `.npz` path(s) in the script).
 
 **Dependencies:** **Dependencies:** `numpy`, `matplotlib`, `sympy`, `torch` (and for notebooks: `ipython`, `matplotlib-inline`; for IRIS: `seaborn`).
 

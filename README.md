@@ -6,6 +6,8 @@ The project focuses on **modular aircraft architectures**, **physics-based simul
 ⚠️ **Status: Active Research & Development**  
 Core simulation and control functionality is implemented and tested. Several subsystems (notably AI guidance and ML training workflows) are under active refinement.
 
+📁 **AI/ML Experiments & notebooks** → **[AI-ML-Experiments](AI-ML-Experiments/)** — Pose-from-IMU+Altitude training (Phase 1), demos, and roadmap. [README](AI-ML-Experiments/README.md)
+
 ---
 
 ## ✈️ Features
@@ -67,6 +69,8 @@ This structure mirrors real aerospace flight stacks and ensures safety, interpre
 - **Phase 2 (6-D):** Add x, y via sequence-based position (e.g. `imu_physics_position_logger`) or fused estimate; train on diverse sim data and save weights.
 - **Phase 3 (planned):** Fuse LIDAR and camera (e.g. LIDAR odometry, visual odometry) with IMU and learned pose for drift correction and long-duration GPS-free navigation.
 - **Goal:** A control architecture that can run without GPS by fusing IMU, barometer, learned pose, and (optionally) LIDAR and camera in the EKF.
+
+**→ Phase 1 implemented:** Notebook and script in **[AI-ML-Experiments](AI-ML-Experiments/)** (pose-from-IMU+altitude training, results, and roadmap).
 
 ---
 
@@ -272,11 +276,13 @@ Requires Gazebo + localization running. See `marid_logging/README.md` for when t
 
 ### Pose-from-IMU+Altitude (EKF Augmentation)
 
-Train a model to predict pose from IMU + altitude, to assist the EKF.
+Train a model to predict pose from IMU + altitude to assist the EKF. **Phase 1 (4-D: z, roll, pitch, yaw) is implemented.**
 
 1. **Data collection:** Run `pose_estimator_logger` during simulation (Gazebo + localization).
-2. **Train:** Learn `f(IMU, altitude) → pose` from `marid_pose_imu_altitude_*.npz`.
+2. **Train:** Use the **[AI-ML-Experiments](AI-ML-Experiments/)** notebook or script: load `marid_pose_imu_altitude_*.npz`, train 11→256→256→4 with dropout and LR schedule, save weights.
 3. **Deploy:** Integrate model to augment EKF (future work).
+
+📁 **Notebooks & scripts:** [AI-ML-Experiments/README.md](AI-ML-Experiments/README.md) — pose-from-IMU training, demos, and roadmap.
 
 ---
 
