@@ -40,7 +40,7 @@ ML/DL experiments and demos for the **MARID** UAV project. This folder holds opt
 
 Feedforward net (11→256→256→4) trained on combined sim data; targets z, roll, pitch, yaw from Gazebo.
 
-![Phase 1 training curves]
+**Phase 1 training curves:**
 <img width="1390" height="789" alt="image" src="https://github.com/user-attachments/assets/c1df9f97-ceb7-46c4-9b60-74789b44004e" />
 
 *Example run: Val MSE ≈ 0.19; per-output (z, roll, pitch, yaw): 0.600, 0.079, 0.034, 0.066.*
@@ -54,9 +54,6 @@ Feedforward net (11→256→256→4) trained on combined sim data; targets z, ro
 - **Script:** `python gradient_descent_optimization.py` (if using the `.py` version).
 
 **Dependencies:** **Dependencies:** `numpy`, `matplotlib`, `sympy`, `torch` (and for notebooks: `ipython`, `matplotlib-inline`; for IRIS: `seaborn`).
-
-<img width="1142" height="532" alt="image" src="https://github.com/user-attachments/assets/90b97200-72de-4bdb-8b9b-cbeabb60daad" />
-
 
 <img width="638" height="532" alt="image" src="https://github.com/user-attachments/assets/654e8894-82e3-4092-889c-68286ee7fa7b" /> <img width="642" height="522" alt="image" src="https://github.com/user-attachments/assets/4511e721-7ce5-428b-9c2e-6c2b24a3f110" />
 
