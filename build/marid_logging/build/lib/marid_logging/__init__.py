@@ -1,1 +1,0 @@
-# MARID logging package
