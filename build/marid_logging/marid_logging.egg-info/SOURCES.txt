@@ -1,0 +1,17 @@
+README.md
+package.xml
+setup.cfg
+setup.py
+../../build/marid_logging/marid_logging.egg-info/PKG-INFO
+../../build/marid_logging/marid_logging.egg-info/SOURCES.txt
+../../build/marid_logging/marid_logging.egg-info/dependency_links.txt
+../../build/marid_logging/marid_logging.egg-info/entry_points.txt
+../../build/marid_logging/marid_logging.egg-info/requires.txt
+../../build/marid_logging/marid_logging.egg-info/top_level.txt
+../../build/marid_logging/marid_logging.egg-info/zip-safe
+marid_logging/__init__.py
+marid_logging/imu_logger.py
+marid_logging/imu_physics_position_logger.py
+marid_logging/marid_data_logger.py
+marid_logging/pose_estimator_logger.py
+resource/marid_logging

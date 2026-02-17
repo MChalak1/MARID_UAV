@@ -1,0 +1,6 @@
+Metadata-Version: 2.1
+Name: marid-logging
+Version: 0.1.0
+Summary: MARID UAV sensor data logging (IMU, etc.) to CSV for ML and analysis.
+Maintainer: MARID
+License: Apache-2.0

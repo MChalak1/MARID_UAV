@@ -1,0 +1,6 @@
+{
+  "package_name": "fast_lio",
+  "non_idl_tuples": [
+    "/home/mchalak/marid_ws/src/FAST_LIO_ROS2/FAST_LIO:msg/Pose6D.msg"
+  ]
+}
