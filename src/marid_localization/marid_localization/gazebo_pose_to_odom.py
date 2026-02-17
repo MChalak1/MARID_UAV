@@ -24,6 +24,7 @@ class GazeboPoseToOdom(Node):
         self.declare_parameter('publish_rate', 50.0)
         self.declare_parameter('use_gz_model_command', True)  # Use gz model command as fallback
         self.declare_parameter('airspeed_topic', '/airspeed/velocity')  # Airspeed topic from pitot tube (converted)
+        self.declare_parameter('initial_query_delay', 8.0)  # Seconds to wait before first pose query (model spawn + gz_ros_control init)
         
         self.model_name_ = self.get_parameter('model_name').value
         self.odom_frame_id_ = self.get_parameter('odom_frame_id').value
@@ -31,8 +32,10 @@ class GazeboPoseToOdom(Node):
         self.publish_rate_ = self.get_parameter('publish_rate').value
         self.use_gz_model_ = self.get_parameter('use_gz_model_command').value
         self.airspeed_topic_ = self.get_parameter('airspeed_topic').value
+        self.initial_query_delay_ = self.get_parameter('initial_query_delay').value
         
         # State
+        self.start_time_ = time.time()
         self.last_position_ = None
         self.last_time_ = None
         self.pose_received_ = False
@@ -74,8 +77,8 @@ class GazeboPoseToOdom(Node):
     
     def query_pose_using_gz_model(self):
         """Query model pose using gz model command"""
-        max_retries = 2
-        timeout = 5.0  # Increased from 3.0 to 5.0 seconds
+        max_retries = 3
+        timeout = 8.0  # Allow time for gz to respond (can be slow during sim init)
         
         for attempt in range(max_retries):
             try:
@@ -90,15 +93,16 @@ class GazeboPoseToOdom(Node):
                     executable='/bin/bash'
                 )
                 
-                if result.returncode == 0 and result.stdout:
-                    # Parse output format:
-                    parsed = self.parse_gz_model_output(result.stdout)
-                    if parsed is not None:
-                        return parsed
-                    elif result.stdout:
+                if result.returncode == 0:
+                    # Combine stdout and stderr - "Requesting state..." may go to either stream
+                    output = (result.stdout or '') + '\n' + (result.stderr or '')
+                    if output.strip():
+                        parsed = self.parse_gz_model_output(output)
+                        if parsed is not None:
+                            return parsed
                         # Log the actual output for debugging (only on last attempt)
                         if attempt == max_retries - 1:
-                            self.get_logger().warn(f'Failed to parse output. First 200 chars: {result.stdout[:200]}')
+                            self.get_logger().warn(f'Failed to parse output. First 300 chars: {output[:300]}')
                 else:
                     if result.returncode != 0:
                         if attempt == max_retries - 1:  # Last attempt
@@ -115,8 +119,8 @@ class GazeboPoseToOdom(Node):
                         
             except subprocess.TimeoutExpired:
                 if attempt == max_retries - 1:  # Last attempt
-                    self.get_logger().warn(f'gz model command timed out after {max_retries} attempts (timeout: {timeout}s)')
-                    self.get_logger().warn('Is Gazebo running? Is the model spawned?')
+                    self.get_logger().warning(f'gz model command timed out after {max_retries} attempts (timeout: {timeout}s)')
+                    self.get_logger().warning('Is Gazebo running? Is the model spawned?')
                 else:
                     timeout += 2.0  # Increase timeout for next attempt
                     time.sleep(0.5)
@@ -131,30 +135,35 @@ class GazeboPoseToOdom(Node):
         return None
     
     def parse_gz_model_output(self, output):
-        """Parse pose from gz model -p output"""
+        """Parse pose from gz model -p output.
+        Handles both formats:
+        - Pipe-separated: [0.000000 | 2.000000 | 0.325000]
+        - Space-separated: [0.000000 2.000000 0.325000]
+        """
         try:
             from geometry_msgs.msg import PoseWithCovarianceStamped
             from tf_transformations import quaternion_from_euler
             import re
             
-            # Parse format:
-            # Pose [ XYZ (m) ] [ RPY (rad) ]:
-            # [0.000000 2.000000 3.000000]  <- XYZ line
-            # [0.000000 -0.000000 0.000000]  <- RPY line
+            # Pattern to match [n1 n2 n3] - allows spaces OR pipes between numbers
+            # Matches: [0 1 2], [0.0 | 1.0 | 2.0], [0.0  1.0  2.0]
+            pattern = r'\[\s*([-\d.eE]+)\s*[|\s]+\s*([-\d.eE]+)\s*[|\s]+\s*([-\d.eE]+)\s*\]'
             
-            # Pattern to match [number number number]
-            pattern = r'\[\s*([-\d.eE]+)\s+([-\d.eE]+)\s+([-\d.eE]+)\s*\]'
-            
-            # Find the "Pose" section to avoid matching "Model: [10]"
-            pose_section_start = output.find('Pose')
+            # Find the model "Pose" section (avoid matching "Inertial Pose" or "Link" poses)
+            # Look for "- Pose" or "Pose [ XYZ" to get the model-level pose
+            pose_section_start = output.find('- Pose [ XYZ')
+            if pose_section_start == -1:
+                pose_section_start = output.find('Pose [ XYZ')
+            if pose_section_start == -1:
+                pose_section_start = output.find('Pose')
             if pose_section_start == -1:
                 self.get_logger().warn('Could not find "Pose" section in output')
                 return None
             
-            # Get everything after "Pose"
+            # Get everything after the Pose header
             after_pose = output[pose_section_start:]
             
-            # Find all matches of [number number number] after "Pose"
+            # Find the first two bracket groups (XYZ then RPY)
             matches = re.findall(pattern, after_pose)
             
             if len(matches) >= 2:
@@ -179,7 +188,7 @@ class GazeboPoseToOdom(Node):
                     math.isnan(roll) or math.isnan(pitch) or math.isnan(yaw) or
                     math.isinf(x) or math.isinf(y) or math.isinf(z) or
                     math.isinf(roll) or math.isinf(pitch) or math.isinf(yaw)):
-                    self.get_logger().warn(f'Parsed NaN or infinite values from Gazebo pose: x={x}, y={y}, z={z}, roll={roll}, pitch={pitch}, yaw={yaw}')
+                    self.get_logger().warning(f'Parsed NaN or infinite values from Gazebo pose: x={x}, y={y}, z={z}, roll={roll}, pitch={pitch}, yaw={yaw}')
                     return None
                 
                 pose_msg.pose.pose.position.x = x
@@ -192,7 +201,7 @@ class GazeboPoseToOdom(Node):
                 # Validate quaternion is not NaN
                 if (math.isnan(qx) or math.isnan(qy) or math.isnan(qz) or math.isnan(qw) or
                     math.isinf(qx) or math.isinf(qy) or math.isinf(qz) or math.isinf(qw)):
-                    self.get_logger().warn(f'Quaternion conversion produced NaN or infinite values: qx={qx}, qy={qy}, qz={qz}, qw={qw}')
+                    self.get_logger().warning(f'Quaternion conversion produced NaN or infinite values: qx={qx}, qy={qy}, qz={qz}, qw={qw}')
                     return None
                 
                 pose_msg.pose.pose.orientation.x = qx
@@ -205,7 +214,7 @@ class GazeboPoseToOdom(Node):
                 
                 return pose_msg
             else:
-                self.get_logger().warn(f'Found {len(matches)} matches, expected at least 2')
+                self.get_logger().warning(f'Found {len(matches)} matches, expected at least 2')
                 
         except Exception as e:
             self.get_logger().error(f'Error parsing gz model output: {e}')
@@ -218,6 +227,11 @@ class GazeboPoseToOdom(Node):
         if not self.use_gz_model_:
             return
         
+        # Wait for model spawn and gz_ros_control init before first query
+        elapsed = time.time() - self.start_time_
+        if elapsed < self.initial_query_delay_:
+            return
+        
         pose_msg = self.query_pose_using_gz_model()
         
         if pose_msg is None:
@@ -226,7 +240,7 @@ class GazeboPoseToOdom(Node):
                 self._warn_count = 0
             self._warn_count += 1
             if self._warn_count % 250 == 0:  # Every 5 seconds
-                self.get_logger().warn('Still unable to query pose from Gazebo. Is Gazebo running?')
+                self.get_logger().warning('Still unable to query pose from Gazebo. Is Gazebo running?')
             return
         
         # Validate pose values are not NaN before publishing
@@ -241,7 +255,7 @@ class GazeboPoseToOdom(Node):
                 self._nan_warn_count = 0
             self._nan_warn_count += 1
             if self._nan_warn_count % 250 == 0:  # Every 5 seconds at 50Hz
-                self.get_logger().warn('Received NaN or infinite values from Gazebo pose query, skipping publication')
+                self.get_logger().warning('Received NaN or infinite values from Gazebo pose query, skipping publication')
             return
         
         if not self.pose_received_:

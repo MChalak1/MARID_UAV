@@ -29,9 +29,9 @@ def imuCallback(imu):
         imuCallback._nan_warn_count += 1
         if imuCallback._nan_warn_count % 100 == 0:  # Log periodically
             if hasattr(imuCallback, '_node') and imuCallback._node is not None:
-                imuCallback._node.get_logger().warn('Received NaN or infinite values in IMU data, skipping publication')
+                imuCallback._node.get_logger().warning('Received NaN or infinite values in IMU data, skipping publication')
         return
-    
+
     imu.header.frame_id = "imu_link_ekf"
     imu_pub.publish(imu)
 
