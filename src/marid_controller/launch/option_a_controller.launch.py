@@ -49,8 +49,8 @@ def launch_setup(context):
     destination_lon = float(context.launch_configurations['destination_longitude'])
     destination_x = float(context.launch_configurations.get('destination_x', '-1.0'))
     destination_y = float(context.launch_configurations.get('destination_y', '-1.0'))
-    datum_lat = 37.45397139527321  # SF Bay Area
-    datum_lon = -122.16791304213365
+    datum_lat = 37.4  # Match Gazebo world origin (wt.sdf)
+    datum_lon = -122.1
     
     # Determine if local coordinates are set (both must be != -1.0)
     use_local_coords = (destination_x != -1.0 and destination_y != -1.0)

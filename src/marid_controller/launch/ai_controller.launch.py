@@ -25,8 +25,8 @@ def generate_launch_description():
                 # 'destination_x': 100.0,  # Target X (m) - only if lat/lon not set
                 # 'destination_y': 100.0,  # Target Y (m) - only if lat/lon not set
                 # Datum (reference point) - must match navsat_transform.yaml
-                'datum_latitude': 37.45397139527321,  # Reference latitude (degrees) - SF Bay Area
-                'datum_longitude': -122.16791304213365,  # Reference longitude (degrees) - SF Bay Area
+                'datum_latitude': 37.4,  # Match Gazebo world origin (wt.sdf)
+                'datum_longitude': -122.1,
                 # Altitude and velocity
                 'altitude_min': 3.0,  # Minimum altitude (m)
                 'altitude_max': 10.0,  # Maximum altitude (m)

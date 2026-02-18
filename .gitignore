@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-install/
-log/
-=======
 # ROS2 build artifacts
 build/
 install/
@@ -204,4 +200,3 @@ Thumbs.db
 *.tmp
 *.bak
 *~
->>>>>>> origin/main

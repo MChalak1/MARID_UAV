@@ -176,7 +176,7 @@
   <joint name="tail_left_joint" type="revolute">
     <parent link="main_tail"/>
     <child link="tail_left"/>
-    <origin xyz="0 -.28 0" rpy="0.3491 0 0"/>
+    <origin xyz="0 -.28 0" rpy="0 0 0"/>
     <axis xyz="0.7071 0 -0.7071"/>
     <dynamics damping="2.5" friction="1.0"/>  <!-- Reduced for servo-like behavior: locked when idle, moves when commanded -->
     <sensor name="left_tail_ft" type="force_torque">
@@ -214,7 +214,7 @@
   <joint name="tail_right_joint" type="revolute">
     <parent link="main_tail"/>
     <child link="tail_right"/>
-    <origin xyz="0 -0.28 0" rpy="0.3491 0 0"/>
+    <origin xyz="0 -0.28 0" rpy="0 0 0"/>
     <axis xyz="0.7071 0 0.7071"/>
     <dynamics damping="2.5" friction="1.0"/>  <!-- Reduced for servo-like behavior: locked when idle, moves when commanded -->
     <sensor name="right_tail_ft" type="force_torque">

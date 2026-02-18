@@ -14,8 +14,8 @@ def generate_launch_description():
     # Shared waypoint parameters
     destination_lat = 34.0522  # Los Angeles, CA
     destination_lon = -118.2437
-    datum_lat = 37.45397139527321  # SF Bay Area
-    datum_lon = -122.16791304213365
+    datum_lat = 37.4  # Match Gazebo world origin (wt.sdf)
+    datum_lon = -122.1
     
     # Get launch file paths
     marid_localization_dir = get_package_share_directory('marid_localization')

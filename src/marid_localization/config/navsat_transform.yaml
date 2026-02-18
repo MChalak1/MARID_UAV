@@ -4,13 +4,15 @@ navsat_transform:
     delay: 3.0
     magnetic_declination_radians: 0.0
     yaw_offset: 0.0
-    zero_altitude: true
-    broadcast_utm_transform: false
+    zero_altitude: false
+    broadcast_utm_transform: true
     publish_filtered_gps: true
     use_odometry_yaw: true
     wait_for_datum: true
+    # Use local tangent-plane ENU at datum (meters from origin) instead of UTM (huge coordinates)
+    use_local_cartesian: true
     
-    # SET YOUR DATUM HERE - These are the GPS coordinates where you spawn
-    datum: [37.45397139527321, -122.16791304213365, 9.0]
+    # Match Gazebo world origin from wt.sdf (spherical_coordinates) - [lat, lon, yaw_rad]
+    datum: [37.4, -122.1, 0.0]
     
     use_sim_time: true

@@ -77,8 +77,8 @@ class MaridAIController(Node):
         self.declare_parameter('destination_y', -1.0)  # Target destination Y (m) - optional
         
         # Datum (reference point) - should match navsat_transform.yaml
-        self.declare_parameter('datum_latitude', 37.45397139527321)  # Reference latitude (degrees)
-        self.declare_parameter('datum_longitude', -122.16791304213365)  # Reference longitude (degrees)
+        self.declare_parameter('datum_latitude', 37.4)  # Match Gazebo world origin (wt.sdf)
+        self.declare_parameter('datum_longitude', -122.1)
         
         # Altitude and velocity parameters
         self.declare_parameter('altitude_min', 3.0)  # Minimum altitude (m)

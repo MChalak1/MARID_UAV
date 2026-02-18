@@ -9,8 +9,8 @@ from launch.actions import TimerAction
 def generate_launch_description():
     destination_lat = 34.0522  # Los Angeles, CA
     destination_lon = -118.2437
-    datum_lat = 37.45397139527321
-    datum_lon = -122.16791304213365
+    datum_lat = 37.4  # Match Gazebo world origin (wt.sdf)
+    datum_lon = -122.1
     
     return LaunchDescription([
         TimerAction(

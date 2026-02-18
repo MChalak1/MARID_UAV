@@ -27,6 +27,18 @@ def generate_launch_description():
                     "--child-frame-id", "imu_link_ekf"],
         ),
         
+        # Align FAST-LIO's camera_init frame with odom (Gazebo world) for EKF fusion.
+        # camera_init origin = first LiDAR scan = robot spawn at (0, 0, 5) in Gazebo.
+        # Enables robot_localization to correctly fuse /Odometry (LiDAR) with /gazebo/odom.
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            arguments=["--x", "0", "--y", "0", "--z", "5.0",
+                       "--qx", "0", "--qy", "0", "--qz", "0", "--qw", "1",
+                       "--frame-id", "odom",
+                       "--child-frame-id", "camera_init"],
+        ),
+        
         # Convert GPS NavSatFix to Odometry in map frame
         Node(
             package='robot_localization',

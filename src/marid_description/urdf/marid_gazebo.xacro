@@ -319,19 +319,20 @@
         <gz_frame_id>gps_link</gz_frame_id>
         
         <!-- GPS Noise Model (realistic consumer-grade GPS) -->
+        <!-- WARNING: gz-sensors NavSat treats stddev as DEGREES not meters (bug #325). -->
+        <!-- Use 0.00002 ≈ 2.2m at 37°N; 2.5 would add ±2.5° ≈ ±280km noise. -->
         <navsat>
-          <!-- Horizontal position noise (standard deviation in meters) -->
           <position_sensing>
             <horizontal>
               <noise type="gaussian">
                 <mean>0.0</mean>
-                <stddev>2.5</stddev> <!-- 2m horizontal accuracy (consumer GPS) -->
+                <stddev>0.00002</stddev> <!-- ~2.5m equiv (workaround for degrees bug) -->
               </noise>
             </horizontal>
             <vertical>
               <noise type="gaussian">
                 <mean>0.0</mean>
-                <stddev>2.5</stddev> <!-- 4m vertical accuracy (worse than horizontal) -->
+                <stddev>0.00002</stddev> <!-- ~2.5m equiv (workaround for degrees bug) -->
               </noise>
             </vertical>
           </position_sensing>

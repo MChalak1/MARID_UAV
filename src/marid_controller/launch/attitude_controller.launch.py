@@ -36,8 +36,8 @@ def generate_launch_description():
                 # Waypoint navigation (should match AI controller)
                 'destination_latitude': 34.0522,  # Los Angeles, CA (default)
                 'destination_longitude': -118.2437,
-                'datum_latitude': 37.45397139527321,  # SF Bay Area
-                'datum_longitude': -122.16791304213365,
+                'datum_latitude': 37.4,  # Match Gazebo world origin (wt.sdf)
+                'datum_longitude': -122.1,
                 'waypoint_tolerance': 2.0,
                 
                 'use_sim_time': True,

@@ -91,8 +91,8 @@ class MaridAIGuidance(Node):
         self.declare_parameter('destination_longitude', -1.0)
         self.declare_parameter('destination_x', -1.0)
         self.declare_parameter('destination_y', -1.0)
-        self.declare_parameter('datum_latitude', 37.45397139527321)
-        self.declare_parameter('datum_longitude', -122.16791304213365)
+        self.declare_parameter('datum_latitude', 37.4)  # Match Gazebo world origin (wt.sdf)
+        self.declare_parameter('datum_longitude', -122.1)
         
         # Guidance parameters
         self.declare_parameter('target_altitude', 8000.0)  # m
