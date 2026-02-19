@@ -37,16 +37,21 @@ data_paths = [
      Path("~/marid_ws/data/marid_pose_imu_altitude_run2_chunk0000.npz").expanduser(),
 ]
 
-# --- Single file: load once ---
-# data = np.load(str(data_path), allow_pickle=True)
-# X = data['imu_inputs'].astype(np.float32)
-# y = data['pose_targets'].astype(np.float32)
+# Colab: use uploaded files (run "from google.colab import files" and "uploaded = files.upload()" first)
+# Local: use data_paths above (or set a single path and use [Path(data_path).expanduser()])
+try:
+    file_list = list(uploaded.keys())  # Colab
+except NameError:
+    file_list = [str(p) for p in data_paths if p.exists()]
+
+if not file_list:
+    raise FileNotFoundError("No .npz files found. Set data_paths to existing files or use Colab upload.")
 
 X_list, y_list = [], []
-for name in uploaded.keys():
-    if not name.endswith('.npz'):
+for path in file_list:
+    if not path.endswith('.npz'):
         continue
-    data = np.load(name, allow_pickle=True)
+    data = np.load(path, allow_pickle=True)
     X_list.append(data['imu_inputs'].astype(np.float32))
     y_list.append(data['pose_targets'].astype(np.float32))
 
@@ -185,4 +190,8 @@ labels = ['z', 'roll', 'pitch', 'yaw']
 for i in range(4):
     mse = np.mean((y_val_np[:, i] - y_val_pred[:, i])**2)
     print(f'{labels[i]}: MSE = {mse:.6f}')
+
+# Optional: save model and normalization for deployment (e.g. in ROS node)
+# torch.save(model.state_dict(), 'pose_from_imu_altitude.pt')
+# np.savez('pose_from_imu_altitude_norm.npz', X_mean=X_mean, X_std=X_std)
 

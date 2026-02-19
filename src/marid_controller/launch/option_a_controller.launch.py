@@ -206,6 +206,9 @@ def launch_setup(context):
                         # Control surface limits
                         'wing_max_deflection': 0.5,
                         'tail_max_deflection': 0.5,
+                        # Altitude control (tail/wings pitch - works with thrust)
+                        'target_altitude': 5.0,
+                        'altitude_pitch_gain': 0.2,
                         # Waypoint navigation (for attitude control) - use local coordinates if set, otherwise GPS
                         'destination_latitude': destination_lat if not use_local_coords else -1.0,
                         'destination_longitude': destination_lon if not use_local_coords else -1.0,

@@ -12,9 +12,8 @@ def generate_launch_description():
 
     config_file = os.path.join(pkg_dir, 'config', 'ekf.yaml')
     navsat_config_file = os.path.join(pkg_dir, 'config', 'navsat_transform.yaml')
+    imu_filter_config_file = os.path.join(pkg_dir, 'config', 'imu_filter_madgwick.yaml')
 
-
-    
     return LaunchDescription([
 
 
@@ -103,12 +102,31 @@ def generate_launch_description():
             }]
         ),
 
+        # Add gravity to IMU so Madgwick sees ~9.81 m/s² when level (Gazebo publishes specific force)
+        Node(
+            package='marid_localization',
+            executable='imu_add_gravity.py',
+            name='imu_add_gravity',
+            output='screen',
+            parameters=[{'use_sim_time': True}],
+        ),
+        # Madgwick filter: /imu/with_gravity -> orientation, publishes to /imu/data
+        Node(
+            package='imu_filter_madgwick',
+            executable='imu_filter_madgwick_node',
+            name='imu_filter_madgwick',
+            output='screen',
+            parameters=[imu_filter_config_file, {'use_sim_time': True}],
+            remappings=[('/imu/data_raw', '/imu/with_gravity')],
+        ),
+        # Republisher: subscribes to Madgwick output (/imu/data), publishes to /imu_ekf (no changes elsewhere)
         Node(
             package='marid_localization',
             executable='imu_republisher.py',
             name='imu_republisher',
             output='screen',
-            parameters=[{'use_sim_time': True}]
+            parameters=[{'use_sim_time': True}],
+            remappings=[('/imu', '/imu/data')],
         ),
         
         # Convert Gazebo pose to odometry (ground truth)

@@ -8,7 +8,7 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from std_msgs.msg import Float64
 import numpy as np
 import math
@@ -103,6 +103,10 @@ class MaridAttitudeController(Node):
         self.declare_parameter('datum_longitude', -122.1)
         self.declare_parameter('waypoint_tolerance', 2.0)
         
+        # Altitude control (tail/wings pitch for altitude hold)
+        self.declare_parameter('target_altitude', 5.0)  # m
+        self.declare_parameter('altitude_pitch_gain', 0.2)  # Pitch (rad) per m altitude error
+        
         # Get parameters
         self.update_rate_ = self.get_parameter('update_rate').value
         
@@ -143,6 +147,8 @@ class MaridAttitudeController(Node):
         self.datum_lat_ = self.get_parameter('datum_latitude').value
         self.datum_lon_ = self.get_parameter('datum_longitude').value
         self.waypoint_tolerance_ = self.get_parameter('waypoint_tolerance').value
+        self.target_altitude_ = self.get_parameter('target_altitude').value
+        self.altitude_pitch_gain_ = self.get_parameter('altitude_pitch_gain').value
         
         # Determine destination
         if dest_lat != -1.0 and dest_lon != -1.0:
@@ -160,6 +166,7 @@ class MaridAttitudeController(Node):
         # Current state
         self.current_odom_ = None
         self.current_imu_ = None
+        self.current_altitude_ = None  # From barometer; fallback to odom z
         self.current_roll_ = 0.0
         self.current_pitch_ = 0.0
         self.current_yaw_ = 0.0
@@ -194,6 +201,13 @@ class MaridAttitudeController(Node):
             10
         )
         
+        self.altitude_sub_ = self.create_subscription(
+            PoseWithCovarianceStamped,
+            '/barometer/altitude',
+            self.altitude_callback,
+            10
+        )
+        
         # Publishers for individual joint commands (ROS2 -> Gazebo Transport via bridge)
         # Using custom topic names without /0/ to be ROS2-compatible
         self.left_wing_pub_ = self.create_publisher(
@@ -223,6 +237,7 @@ class MaridAttitudeController(Node):
         
         self.get_logger().info('MARID Attitude Controller initialized')
         self.get_logger().info(f'Update rate: {self.update_rate_} Hz')
+        self.get_logger().info(f'Altitude control enabled: target={self.target_altitude_} m, gain={self.altitude_pitch_gain_}')
         self.get_logger().info('Publishing to Gazebo joint command topics (bridged)')
         if self.destination_ is not None:
             self.get_logger().info(f'Waypoint navigation enabled')
@@ -270,15 +285,39 @@ class MaridAttitudeController(Node):
         self.current_yaw_rate_ = msg.angular_velocity.z
     
     def waypoint_callback(self, msg):
-        """Update destination waypoint"""
-        self.destination_ = np.array([msg.pose.position.x, msg.pose.position.y])
+        """Update destination waypoint. Log only when waypoint actually changes."""
+        new_xy = np.array([msg.pose.position.x, msg.pose.position.y])
+        if self.destination_ is not None and np.allclose(new_xy, self.destination_, atol=1.0):
+            return  # No change; avoid log spam
+        self.destination_ = new_xy
         self.get_logger().info(f'New waypoint: ({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f}) m')
     
+    def altitude_callback(self, msg):
+        """Store current altitude from barometer"""
+        self.current_altitude_ = msg.pose.pose.position.z
+    
+    def _compute_altitude_pitch(self):
+        """
+        Compute pitch command from altitude error (tail/wings for altitude hold).
+        Pitch down when above target, pitch up when below. Works with thrust for coordinated altitude control.
+        """
+        current_altitude = self.current_altitude_
+        if current_altitude is None and self.current_odom_ is not None:
+            current_altitude = self.current_odom_.pose.pose.position.z
+        if current_altitude is None or not np.isfinite(current_altitude):
+            return 0.0
+        altitude_error = current_altitude - self.target_altitude_
+        altitude_pitch = -self.altitude_pitch_gain_ * altitude_error
+        return np.clip(altitude_pitch, -0.3, 0.3)
+    
     def compute_waypoint_commands(self):
-        """Compute desired roll, pitch, yaw from waypoint navigation"""
+        """Compute desired roll, pitch, yaw from waypoint navigation and altitude control"""
+        # Altitude pitch: pitch down when above target, pitch up when below (tail/wings)
+        altitude_pitch = self._compute_altitude_pitch()
+        
         if self.destination_ is None or self.current_odom_ is None:
-            # Maintain level flight
-            return 0.0, 0.0, self.current_yaw_
+            # Maintain level flight in roll/yaw, but apply altitude pitch
+            return 0.0, altitude_pitch, self.current_yaw_
         
         # Current position
         current_pos = np.array([
@@ -292,11 +331,11 @@ class MaridAttitudeController(Node):
         
         # Safety check: avoid division issues when too close
         if distance < 1e-6:
-            return 0.0, 0.0, self.current_yaw_
+            return 0.0, altitude_pitch, self.current_yaw_
         
         if distance < self.waypoint_tolerance_:
-            # Waypoint reached - maintain level flight
-            return 0.0, 0.0, self.current_yaw_
+            # Waypoint reached - maintain level flight, keep altitude pitch
+            return 0.0, altitude_pitch, self.current_yaw_
         
         # Desired heading to waypoint
         # atan2(y, x) = atan2(north, east) gives angle from East axis (Gazebo/ROS convention)
@@ -321,11 +360,11 @@ class MaridAttitudeController(Node):
         max_bank_angle = math.radians(30.0)
         desired_roll = np.clip(heading_error * 0.5, -max_bank_angle, max_bank_angle)
         
-        # Desired pitch: maintain altitude during turns by pitching up slightly when banking
-        # More bank = more pitch needed to maintain altitude (compensate for lift loss in turns)
-        # Use a small pitch compensation proportional to roll angle
+        # Desired pitch: turn compensation + altitude control
+        # Turn compensation: pitch up slightly when banking to maintain altitude in turns
         pitch_compensation_factor = 0.1  # Tune this (0.1 = 10% of roll angle)
-        desired_pitch = abs(desired_roll) * pitch_compensation_factor  # Pitch up during turns
+        turn_pitch = abs(desired_roll) * pitch_compensation_factor
+        desired_pitch = turn_pitch + altitude_pitch
         
         return desired_roll, desired_pitch, desired_yaw
     

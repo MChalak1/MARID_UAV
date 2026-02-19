@@ -1,0 +1,19 @@
+# IMU orientation filter (Madgwick) - fuses gyro + accel into orientation
+# Requires: sudo apt install ros-<distro>-imu-filter-madgwick
+# Subscribes to raw /imu, publishes to /imu/data; republisher forwards to /imu_ekf
+
+imu_filter_madgwick:
+  ros__parameters:
+    # No magnetometer - use only gyro and accelerometer
+    use_mag: false
+    # World frame: enu (Z up, X East, Y North) to match odom/Gazebo
+    world_frame: "enu"
+    # EKF publishes TF; filter does not
+    publish_tf: false
+    fixed_frame: "odom"
+    # Not stateless - maintain filter state across messages
+    stateless: false
+    # Algorithm gain (default 0.1). Lower = smoother, higher = more responsive
+    gain: 0.1
+    # Use sim time when running in Gazebo (also set in launch)
+    use_sim_time: true

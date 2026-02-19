@@ -89,6 +89,9 @@
       <geometry>
         <mesh filename="package://marid_description/meshes/left_wing.stl"/>
       </geometry>
+      <material name="left_wing_red">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+      </material>
     </visual>
     <collision>
       <origin xyz="${left_wing_offset}" rpy="0 0 0"/>
@@ -126,6 +129,9 @@
       <geometry>
         <mesh filename="package://marid_description/meshes/right_wing.stl"/>
       </geometry>
+      <material name="right_wing_blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
     </visual>
     <collision>
       <origin xyz="${right_wing_offset}" rpy="0 0 0"/>
@@ -164,6 +170,9 @@
       <geometry>
         <mesh filename="package://marid_description/meshes/tail_left.stl"/>
       </geometry>
+      <material name="tail_left_red">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+      </material>
     </visual>
     <collision>
       <origin xyz="0 0.25 0" rpy="0 0 0"/>
@@ -202,6 +211,9 @@
       <geometry>
         <mesh filename="package://marid_description/meshes/tail_right.stl"/>
       </geometry>
+      <material name="tail_right_blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
     </visual>
     <collision>
       <origin xyz="0 0.25 0" rpy="0 0 0"/>

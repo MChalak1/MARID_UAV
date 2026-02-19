@@ -25,7 +25,7 @@ ekf_filter_node_odom:
     # IMU is REQUIRED for EKF to start publishing TF
     imu0: /imu_ekf
     imu0_config: [false, false, false,   # IMU does NOT provide position!
-                  true,  true,  true,    # roll, pitch, yaw (orientation)
+                  true,  true,  true,     # roll, pitch, yaw from Madgwick-filtered IMU
                   false, false, false,   # x_vel, y_vel, z_vel
                   false, false, true,    # roll_vel, pitch_vel, yaw_vel
                   false,  false,  false]    # x_accel, y_accel, z_accel
@@ -56,7 +56,7 @@ ekf_filter_node_odom:
     # NOTE: EKF can publish TF with just IMU, but position will be 0,0,5 until this arrives
     odom0: /gazebo/odom
     odom0_config: [true,  true,  true,    # Use X, Y, Z position from Gazebo (ground truth)
-                   false, false, false,    # Don't use orientation (use IMU instead)
+                   true,  true,  true,     # Use roll, pitch, yaw from Gazebo (so /odometry/filtered/local has real orientation)
                    true,  true,  true,     # Use X, Y, Z velocities
                    false, false, false,
                    false, false, false]

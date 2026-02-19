@@ -236,8 +236,18 @@ class MaridAIGuidance(Node):
             10
         )
         
+        # Publish current waypoint so attitude controller (and others) receive it
+        self.waypoint_pub_ = self.create_publisher(
+            PoseStamped,
+            '/marid/waypoint',
+            10
+        )
+        
         # Control timer
         self.control_timer_ = self.create_timer(1.0 / self.update_rate_, self.guidance_loop)
+        
+        # Publish waypoint once after a short delay so subscribers (e.g. attitude controller) get it
+        self._waypoint_timer = self.create_timer(1.0, self._publish_waypoint_once)
         
         self.get_logger().info('MARID AI Guidance Node initialized (Option A architecture)')
         self.get_logger().info(f'  Control mode: {self.control_mode_}')
@@ -274,12 +284,33 @@ class MaridAIGuidance(Node):
         self.current_altitude_ = msg.pose.pose.position.z
     
     def waypoint_callback(self, msg):
-        """Update destination waypoint"""
-        self.destination_ = np.array([msg.pose.position.x, msg.pose.position.y])
+        """Update destination waypoint (from external source). Ignore our own publishes to avoid feedback loop."""
+        new_xy = np.array([msg.pose.position.x, msg.pose.position.y])
+        if np.allclose(new_xy, self.destination_, atol=1.0):
+            return  # Likely our own message or duplicate; avoid loop and log spam
+        self.destination_ = new_xy
         if msg.pose.position.z > 0:
             self.target_altitude_ = msg.pose.position.z
         self.waypoint_reached_ = False
         self.get_logger().info(f'New waypoint: ({self.destination_[0]:.2f}, {self.destination_[1]:.2f}) m')
+        # Do not republish here - that caused feedback loop (we receive our own msg and republish)
+
+    def _publish_waypoint_msg(self):
+        """Publish current waypoint to /marid/waypoint (for attitude controller)."""
+        msg = PoseStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'odom'
+        msg.pose.position.x = float(self.destination_[0])
+        msg.pose.position.y = float(self.destination_[1])
+        msg.pose.position.z = self.target_altitude_
+        msg.pose.orientation.w = 1.0
+        self.waypoint_pub_.publish(msg)
+
+    def _publish_waypoint_once(self):
+        """Publish waypoint once so attitude controller receives it (fixes constant wings/tail)."""
+        self._publish_waypoint_msg()
+        self._waypoint_timer.cancel()
+        self.get_logger().info('Published waypoint to /marid/waypoint for attitude controller')
     
     def get_state_vector(self):
         """

@@ -267,6 +267,7 @@
           <gz_frame_id>imu_link</gz_frame_id>
           <topic>/imu</topic>
           <imu>
+            <enable_orientation>true</enable_orientation>
             <angular_velocity>
               <x>
                 <noise type="gaussian">
