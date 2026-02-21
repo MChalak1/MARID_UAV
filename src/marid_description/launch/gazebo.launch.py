@@ -44,7 +44,7 @@ def generate_launch_description():
 
 
     world_path = os.path.join(get_package_share_directory("marid_description"),
-                          "worlds", "wt.sdf")
+                          "worlds", "empty.sdf")
 
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
