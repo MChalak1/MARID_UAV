@@ -39,6 +39,16 @@ def generate_launch_description():
             default_value='-1.0',  # -1.0 means not set, use GPS coordinates instead
             description='Destination Y coordinate in meters (local ENU frame). Use -1.0 to use GPS coordinates.'
         ),
+        DeclareLaunchArgument(
+            'use_center_thruster',
+            default_value='false',
+            description='Use single center thruster (true) or dual left/right (false)'
+        ),
+        DeclareLaunchArgument(
+            'initial_thrust',
+            default_value='1.0',
+            description='Initial thrust in Newtons'
+        ),
         # Use OpaqueFunction to access launch arguments and convert to floats
         OpaqueFunction(function=launch_setup)
     ])
@@ -49,6 +59,8 @@ def launch_setup(context):
     destination_lon = float(context.launch_configurations['destination_longitude'])
     destination_x = float(context.launch_configurations.get('destination_x', '-1.0'))
     destination_y = float(context.launch_configurations.get('destination_y', '-1.0'))
+    use_center_thruster = context.launch_configurations.get('use_center_thruster', 'false').lower() == 'true'
+    initial_thrust = float(context.launch_configurations.get('initial_thrust', '1.0'))
     datum_lat = 37.4  # Match Gazebo world origin (wt.sdf)
     datum_lon = -122.1
     
@@ -79,7 +91,7 @@ def launch_setup(context):
             name="marid_thrust_controller",
             output='screen',
             parameters=[{
-                'initial_thrust': 0.0,
+                'initial_thrust': initial_thrust,
                 'min_thrust': 0.0,
                 'thrust_to_weight_ratio': 0.65,  # Reduced from 2.5: gives max thrust ~1.3x weight (reasonable for aircraft)
                 'thrust_increment': 1.0,
@@ -91,7 +103,7 @@ def launch_setup(context):
                 'enable_differential': False,  # Disable differential thrust - yaw controlled aerodynamically
                 'thrust_to_angvel_gain': 50.0,  # Conversion factor: omega = gain * sqrt(thrust)
                 'use_thruster_plugin': True,  # Use Gazebo Thruster plugin (True) or legacy wrench (False)
-                'use_center_thruster': False,  # Use single center thruster (True) or dual left/right (False) - set to True for testing
+                'use_center_thruster': use_center_thruster,  # Use single center thruster (True) or dual left/right (False)
                 'use_sim_time': True,
             }]
         ),
@@ -150,7 +162,7 @@ def launch_setup(context):
                     parameters=[{
                         'update_rate': 50.0,
                         # Thrust parameters
-                        'base_thrust_override': 1.0,  # Fixed thrust of 1.0N (overrides PID calculations)
+                        'base_thrust_override': initial_thrust, # Fixed thrust (overrides PID calculations)
                         'thrust_to_weight_ratio': 0.65,  # Not used when override is set
                         'min_thrust': 0.0,
                         'max_yaw_differential': 0.2,

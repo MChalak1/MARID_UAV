@@ -558,6 +558,9 @@ class MaridThrustController(Node):
             # More realistic would account for propeller diameter, density, etc.
             # The gain parameter can be tuned based on testing
             left_omega = self.thrust_to_angvel_gain_ * math.sqrt(max(0.0, left_thrust))
+            # Both thrusters have normal joint axis (xyz="0 1 0") and positive coefficients
+            # Both receive positive angular velocity - same rotation direction
+            # Reaction torques will need to be compensated via aerodynamic control surfaces
             right_omega = self.thrust_to_angvel_gain_ * math.sqrt(max(0.0, right_thrust))
             
             # Publish angular velocity commands
@@ -575,11 +578,11 @@ class MaridThrustController(Node):
             self._thruster_log_counter += 1
             
             if self._thruster_log_counter == 1:
-                self.get_logger().info('Thruster commands published successfully!')
+                self.get_logger().info('Thruster commands published successfully! Both thrusters rotating in same direction - reaction torques compensated aerodynamically.')
             elif self._thruster_log_counter % 50 == 0:
                 self.get_logger().debug(
                     f'Thruster commands: L={left_thrust:.2f}N→{left_omega:.1f}rad/s, '
-                    f'R={right_thrust:.2f}N→{right_omega:.1f}rad/s'
+                    f'R={right_thrust:.2f}N→{right_omega:.1f}rad/s (counter-rotating)'
                 )
         else:
             # ===== LEGACY: Use ApplyLinkWrench Plugin =====

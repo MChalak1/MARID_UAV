@@ -33,5 +33,4 @@ def generate_launch_description():
     return LaunchDescription([
         joint_state_broadcaster_spawner,
         simple_position_controller,
-        # marid_odom_pub removed - redundant with EKF sources (/gazebo/odom, /imu_ekf, /barometer/altitude)
     ])

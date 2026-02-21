@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, TimerAction
+from launch.actions import DeclareLaunchArgument, TimerAction, IncludeLaunchDescription
+from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, Command
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -15,8 +17,16 @@ def generate_launch_description():
     imu_filter_config_file = os.path.join(pkg_dir, 'config', 'imu_filter_madgwick.yaml')
 
     return LaunchDescription([
-
-
+        DeclareLaunchArgument(
+            'use_sim_time',
+            default_value='true',
+            description='Use simulation time'
+        ),
+        DeclareLaunchArgument(
+            'use_fast_lio',
+            default_value='true',
+            description='Whether to launch FAST-LIO LiDAR-inertial odometry (publishes /Odometry for EKF)'
+        ),
         Node(
             package="tf2_ros",
             executable="static_transform_publisher",
@@ -27,18 +37,28 @@ def generate_launch_description():
         ),
         
         # Align FAST-LIO's camera_init frame with odom (Gazebo world) for EKF fusion.
-        # camera_init origin = first LiDAR scan = robot spawn at (0, 0, 5) in Gazebo.
+        # camera_init origin = first LiDAR scan = robot spawn at (0, 0, 0.8) in Gazebo.
         # Enables robot_localization to correctly fuse /Odometry (LiDAR) with /gazebo/odom.
         Node(
             package="tf2_ros",
             executable="static_transform_publisher",
-            arguments=["--x", "0", "--y", "0", "--z", "5.0",
+            arguments=["--x", "0", "--y", "0", "--z", "0.8",
                        "--qx", "0", "--qy", "0", "--qz", "0", "--qw", "1",
                        "--frame-id", "odom",
                        "--child-frame-id", "camera_init"],
         ),
-        
+        # FAST-LIO LiDAR-inertial odometry (optional; publishes /Odometry for local EKF)
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(pkg_dir, 'launch', 'fast_lio.launch.py')
+            ),
+            condition=IfCondition(LaunchConfiguration('use_fast_lio')),
+            launch_arguments=[
+                ('use_sim_time', LaunchConfiguration('use_sim_time')),
+            ],
+        ),
         # Convert GPS NavSatFix to Odometry in map frame
+
         Node(
             package='robot_localization',
             executable='navsat_transform_node',
@@ -49,13 +69,15 @@ def generate_launch_description():
                 ('/imu', '/imu_ekf'),
                 ('/odometry/filtered', '/odometry/filtered/local'),
                 ('/odometry/gps', '/gps/odometry')
-            ]
+                ]
         ),
+
+
         
-        # Local EKF - fuses IMU + Barometer
-        # Delay startup by 3 seconds to allow sensors to initialize and publish valid data
+        # Local EKF - fuses IMU + Barometer + /gazebo/odom (+ FAST-LIO, marid/odom)
+        # Delay startup so /gazebo/odom and other sensors are publishing valid (non-NaN) data
         TimerAction(
-            period=3.0,
+            period=25.0,
             actions=[
         Node(
             package='robot_localization',
@@ -71,9 +93,9 @@ def generate_launch_description():
         ),
         
         # Global EKF - fuses local odometry + GPS
-        # Delay startup by 4 seconds (after local EKF) to ensure local EKF is publishing
+        # Delay startup after local EKF (local starts at 25s) so map EKF gets /odometry/filtered/local
         TimerAction(
-            period=4.0,
+            period=40.0,
             actions=[
         Node(
             package='robot_localization',
@@ -128,23 +150,14 @@ def generate_launch_description():
             parameters=[{'use_sim_time': True}],
             remappings=[('/imu', '/imu/data')],
         ),
-        
-        # Convert Gazebo pose to odometry (ground truth)
+        # IMU-based odometry (publishes /marid/odom for EKF when FAST-LIO/Gazebo pose unavailable)
         Node(
-            package='marid_localization',
-            executable='gazebo_pose_to_odom.py',
-            name='gazebo_pose_to_odom',
+            package='marid_controller',
+            executable='marid_odom_pub.py',
+            name='marid_odom_node',
             output='screen',
-            parameters=[{
-                'model_name': 'marid',
-                'odom_frame_id': 'odom',
-                'base_frame_id': 'base_link_front',
-                'publish_tf': False,  # EKF handles TF
-                'use_sim_time': True,
-                'airspeed_topic': '/airspeed/velocity',  # Use converted airspeed topic
-            }]
+            parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
         ),
-        
         # Airspeed converter - converts gz.msgs.AirSpeed to std_msgs/Float64
         Node(
             package='marid_localization',

@@ -11,23 +11,18 @@ ekf_filter_node_odom:
     base_link_frame: base_link_front
     world_frame: odom
     
-    # Transform parameters
+    # Transform parameters (publish_tf false temporarily to debug NaN TF)
     publish_tf: true
     publish_acceleration: false
 
-    initial_state: [0.0, 0.0, 5.0,    # x, y, z position
-                    0.0, 0.0, 0.0,    # roll, pitch, yaw
-                    0.0, 0.0, 0.0,    # vx, vy, vz
-                    0.0, 0.0, 0.0,    # vroll, vpitch, vyaw
-                    0.0, 0.0, 0.0]    # ax, ay, az
-    
+ 
     # IMU configuration (from /imu_ekf topic)
     # IMU is REQUIRED for EKF to start publishing TF
     imu0: /imu_ekf
     imu0_config: [false, false, false,   # IMU does NOT provide position!
-                  true,  true,  true,     # roll, pitch, yaw from Madgwick-filtered IMU
-                  false, false, false,   # x_vel, y_vel, z_vel
-                  false, false, true,    # roll_vel, pitch_vel, yaw_vel
+                  false,  false,  false,     # roll, pitch, yaw from Madgwick-filtered IMU
+                  false,  false,  false,   # x_vel, y_vel, z_vel
+                  false, false, false,    # roll_vel, pitch_vel, yaw_vel
                   false,  false,  false]    # x_accel, y_accel, z_accel
     imu0_differential: false
     imu0_relative: false
@@ -51,52 +46,52 @@ ekf_filter_node_odom:
     # Barometer sensor covariance
     pose0_pose_nom: 0.1  # Position noise (m²) - moderate for barometer altitude
     
-    # Gazebo ground truth odometry (PRIMARY - provides accurate X, Y, Z from Gazebo)
-    # This is the main source for position since IMU odometry doesn't work for manual movement
-    # NOTE: EKF can publish TF with just IMU, but position will be 0,0,5 until this arrives
+    # Gazebo ground-truth odometry (OdometryPublisher plugin → bridge → /gazebo/odom)
     odom0: /gazebo/odom
-    odom0_config: [true,  true,  true,    # Use X, Y, Z position from Gazebo (ground truth)
-                   true,  true,  true,     # Use roll, pitch, yaw from Gazebo (so /odometry/filtered/local has real orientation)
-                   true,  true,  true,     # Use X, Y, Z velocities
+    odom0_config: [true,  true,  true,    # Use X, Y, Z position from Gazebo
+                   true,   true,  true,    # Use roll, pitch, yaw from Gazebo (avoids IMU-only drift)
+                   true,  true,  true,    # Use X, Y, Z velocities
                    false, false, false,
                    false, false, false]
     odom0_differential: false
     odom0_relative: false
     odom0_queue_size: 10
-    odom0_pose_rejection_threshold: 100.0  # Very permissive for ground truth
-    odom0_twist_rejection_threshold: 50.0
-    # Odometry sensor covariance (low for ground truth)
-    odom0_pose_nom: 0.01  # Position noise (m²) - very low for ground truth
-    odom0_twist_nom: 0.1  # Velocity noise (m²/s²) - low for ground truth
-    
-    # FAST-LIO LiDAR-Inertial Odometry (from 3D LIDAR + IMU)
-    odom1: /Odometry  # FAST-LIO publishes to /Odometry topic
-    odom1_config: [true,  true,  true,    # Use X, Y, Z position from LiDAR odometry
-                   false, false, false,    # Don't use orientation (use IMU instead)
-                   true,  true,  true,     # Use X, Y, Z velocities
-                   false, false, false,
-                   false, false, false]
-    odom1_differential: false
-    odom1_relative: false
-    odom1_queue_size: 10
-    odom1_pose_rejection_threshold: 10.0
-    odom1_twist_rejection_threshold: 5.0
-    # LiDAR odometry covariance (good accuracy, better than GPS)
-    odom1_pose_nom: 0.05  # Position noise (m²) - good for LiDAR odometry
-    odom1_twist_nom: 0.15  # Velocity noise (m²/s²)
-    
-    # Process noise covariance (tune these based on your sensor quality)
-    # Order: x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
-    # Increased values slightly for better numerical stability
-    process_noise_covariance: [0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                               0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                               0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                               0.0,  0.0,  0.0,  0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                               0.0,  0.0,  0.0,  0.0,  0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+    odom0_pose_rejection_threshold: 10.0
+    odom0_twist_rejection_threshold: 5.0
+    odom0_pose_nom: 0.05   # Relaxed from 0.01 to avoid ill-conditioning when fusing with other sources
+    odom0_twist_nom: 0.1   # Relaxed from 0.05
+
+    # DISABLED: FAST-LIO not publishing; re-enable when /Odometry is active
+    # odom1: /Odometry
+    # odom1_config: [true,  true,  true,    # Use X, Y, Z position from LiDAR odometry
+    #                false, false, false,   # Don't use orientation (use IMU instead)
+    #                true,  true,  true,    # Use X, Y, Z velocities
+    #                false, false, false,
+    #                false, false, false]
+    # odom1_differential: false
+    # odom1_relative: false
+    # odom1_queue_size: 10
+    # odom1_pose_rejection_threshold: 10.0
+    # odom1_twist_rejection_threshold: 5.0
+    # odom1_pose_nom: 0.05
+    # odom1_twist_nom: 0.15
+    #
+    # DISABLED temporarily: marid/odom can conflict with gazebo/odom and cause NaN (re-enable once EKF is stable)
+    # odom1: /marid/odom
+    # odom1_config: [true,  true,  true, ...
+    # odom1_* ...
+    #
+    # Process noise covariance (order: x,y,z, roll,pitch,yaw, vx,vy,vz, vroll,vpitch,vyaw, ax,ay,az)
+    # Increased for numerical stability (avoids ill-conditioning / NaN from overconfident state)
+    process_noise_covariance: [0.3, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.3, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.3, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
                                0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.05, 0.0, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.05, 0.0, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.08, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.15, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.02, 0.0,  0.0,  0.0,  0.0,  0.0,
                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.02, 0.0,  0.0,  0.0,  0.0,
                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.04, 0.0,  0.0,  0.0,
@@ -117,15 +112,14 @@ ekf_filter_node_map:
     base_link_frame: base_link_front
     world_frame: map
     
-    # Publish TF: map -> base_link_front
-    # Local EKF publishes odom -> base_link_front (different parent frame, no conflict)
+    
     publish_tf: true
     publish_acceleration: false
     
     # Odometry from local EKF
     odom0: /odometry/filtered/local
     odom0_config: [true,  true,  true,    # Use position from local EKF
-                   true,  true,  true,    # Use orientation
+                   true, true, true,    # Use orientation
                    true,  true,  true,    # Use velocities
                    false, false, false,
                    false, false, false]

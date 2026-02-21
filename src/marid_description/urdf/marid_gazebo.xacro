@@ -201,7 +201,7 @@
             <joint_name>thruster_R_joint</joint_name>
             <fluid_density>1.225</fluid_density>
             <propeller_diameter>0.2</propeller_diameter>
-            <thrust_coefficient>0.8</thrust_coefficient>  <!-- Positive coefficient - counter-rotation achieved via reversed joint axis -->
+            <thrust_coefficient>0.8</thrust_coefficient>  <!-- Typical range: 0.6-1.0 -->
             <use_angvel_cmd>true</use_angvel_cmd>
         </plugin>
     </gazebo>
@@ -469,6 +469,15 @@
       </plugin>
     </gazebo>
 
+    <!-- Odometry Publisher - ground-truth odom for EKF (pose + twist in odom frame) -->
+    <gazebo>
+      <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+        <odom_topic>/model/marid/odometry</odom_topic>
+        <odom_frame>odom</odom_frame>
+        <robot_base_frame>base_link_front</robot_base_frame>
+        <publish_tf>false</publish_tf>
+      </plugin>
+    </gazebo>
 
         <!-- Camera for perception / ML -->
     <gazebo reference="camera_link">

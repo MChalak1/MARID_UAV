@@ -5,8 +5,6 @@ from rclpy.time import Time
 from nav_msgs.msg import Odometry
 import numpy as np
 from sensor_msgs.msg import Imu
-from geometry_msgs.msg import TransformStamped
-from tf2_ros import TransformBroadcaster
 from tf_transformations import quaternion_matrix
 from std_srvs.srv import Empty
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
@@ -27,7 +25,6 @@ class MaridOdomPublisher(Node):
         self.declare_parameter("base_velocity_variance", 0.1)
         self.declare_parameter("variance_growth_rate", 0.001)  # per second
         self.declare_parameter("child_frame_id", "base_link_front")
-        self.declare_parameter("publish_tf", False)  # Let EKF handle TF publishing
         
         # Get parameters
         self.accel_is_sf_ = self.get_parameter("imu_outputs_specific_force").value
@@ -69,7 +66,7 @@ class MaridOdomPublisher(Node):
         self.pose_sub_ = self.create_subscription(
             Imu, "/imu_ekf", self.imuCallback, 10
         )
-        self.odom_pub_ = self.create_publisher(Odometry, "marid/odom", 10)
+        self.odom_pub_ = self.create_publisher(Odometry, "/marid/odom", 10)
         self.diag_pub_ = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
         
         # Timer
@@ -85,12 +82,6 @@ class MaridOdomPublisher(Node):
         self.odom_msg_ = Odometry()
         self.odom_msg_.header.frame_id = "odom"
         self.odom_msg_.child_frame_id = self.child_frame_id_
-        
-        # TF broadcaster
-        self.br_ = TransformBroadcaster(self)
-        self.transform_stamped_ = TransformStamped()
-        self.transform_stamped_.header.frame_id = "odom"
-        self.transform_stamped_.child_frame_id = self.child_frame_id_
         
         # Time tracking
         self.start_time_ = self.get_clock().now()
@@ -113,10 +104,12 @@ class MaridOdomPublisher(Node):
         return response
 
     def normalize_quaternion(self, qx, qy, qz, qw):
-        """Ensure quaternion is normalized"""
+        """Ensure quaternion is normalized; return identity if invalid (NaN/inf/zero norm)."""
+        if (math.isnan(qx) or math.isnan(qy) or math.isnan(qz) or math.isnan(qw) or
+            math.isinf(qx) or math.isinf(qy) or math.isinf(qz) or math.isinf(qw)):
+            return 0.0, 0.0, 0.0, 1.0
         norm = np.sqrt(qx**2 + qy**2 + qz**2 + qw**2)
-        if norm < 0.01:  # Invalid quaternion
-            self.get_logger().warn("Invalid quaternion detected, using identity")
+        if norm < 1e-6 or math.isnan(norm) or math.isinf(norm):
             return 0.0, 0.0, 0.0, 1.0
         return qx/norm, qy/norm, qz/norm, qw/norm
 
@@ -261,6 +254,13 @@ class MaridOdomPublisher(Node):
                 self.get_logger().warn(f'  Orientation: qx={self.qx_}, qy={self.qy_}, qz={self.qz_}, qw={self.qw_}')
             return  # Don't publish invalid data
         
+        # Re-normalize quaternion before publish (avoid denormalized/NaN reaching EKF)
+        self.qx_, self.qy_, self.qz_, self.qw_ = self.normalize_quaternion(
+            self.qx_, self.qy_, self.qz_, self.qw_
+        )
+        if (math.isnan(self.qx_) or math.isnan(self.qy_) or math.isnan(self.qz_) or math.isnan(self.qw_)):
+            return
+        
         # Calculate growing covariance based on time since start
         elapsed_time = (now - self.start_time_).nanoseconds / 1e9
         pos_variance = self.base_pos_var_ + self.var_growth_rate_ * elapsed_time
@@ -307,18 +307,6 @@ class MaridOdomPublisher(Node):
         ]
         
         self.odom_pub_.publish(self.odom_msg_)
-        
-        # Broadcast TF only if enabled (EKF should handle TF publishing)
-        if self.publish_tf_:
-        self.transform_stamped_.header.stamp = now.to_msg()
-        self.transform_stamped_.transform.translation.x = self.x_
-        self.transform_stamped_.transform.translation.y = self.y_
-        self.transform_stamped_.transform.translation.z = self.z_
-        self.transform_stamped_.transform.rotation.x = self.qx_
-        self.transform_stamped_.transform.rotation.y = self.qy_
-        self.transform_stamped_.transform.rotation.z = self.qz_
-        self.transform_stamped_.transform.rotation.w = self.qw_
-        self.br_.sendTransform(self.transform_stamped_)
         
         # Publish diagnostics periodically (every 2 seconds)
         if self.integration_count_ % (int(self.publish_rate_) * 2) == 0:

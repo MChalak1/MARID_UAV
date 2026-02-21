@@ -68,8 +68,7 @@ def generate_launch_description():
         executable="create",
         output="screen",
         arguments=["-topic", "robot_description",
-                   "-name", "marid",
-                   "-x", "0", "-y", "0", "-z", "5.0"]
+                   "-name", "marid"]
             )
         ]
     )
@@ -77,12 +76,20 @@ def generate_launch_description():
     imu_bridge = Node(
     package="ros_gz_bridge",
     executable="parameter_bridge",
+    name="marid_ros_gz_bridge",
+    remappings=[
+        ("/model/marid/odometry", "/gazebo/odom"),
+    ],
     arguments=[
         "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
         "/imu@sensor_msgs/msg/Imu[gz.msgs.IMU",
+        "/model/marid/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry",
         "/baro/pressure@sensor_msgs/msg/FluidPressure[gz.msgs.FluidPressure",
         "/gps/fix@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat",
         "/world/wt/state@gz.msgs.World[gz.msgs.World",
+        # World dynamic poses (published by Gazebo). TFMessage bridge leaves frame ids empty;
+        # use PoseArray and pick model pose by heuristic (largest z above ground).
+        "/world/wt/dynamic_pose/info@geometry_msgs/msg/PoseArray[gz.msgs.Pose_V",
         # Bridge thruster command topics (ROS2 -> Gazebo Transport)
         # Note: ] means ROS2 -> Gazebo, [ means Gazebo -> ROS2
         "/model/marid/joint/thruster_L_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",

@@ -24,7 +24,18 @@
   <xacro:property name="right_wing_offset" value="0.0 ${-axis_offset_y} 0.0"/>
   
   <xacro:property name="wing_axis" value="1 0 0"/>
-  
+
+  <!-- Spawn height: whole robot is lifted so it spawns above ground when model origin is at (0,0,0) -->
+  <xacro:property name="spawn_z_offset" value="0.12"/>
+
+  <!-- Root link at model origin (spawn point). No geometry/inertial needed. -->
+  <link name="base_footprint"/>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link_front"/>
+    <origin xyz="0 0 ${spawn_z_offset}" rpy="0 0 0"/>
+  </joint>
 
   <link name="base_link_front">  
     <inertial>
@@ -360,10 +371,43 @@
       
       <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
       </inertial>
+      <!-- Hub/center cylinder -->
       <visual>
         <origin xyz="0 0 0" rpy="1.5708 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry>
         <material name="red_thruster">
           <color rgba="1.0 0.0 0.0 1.0"/>
+        </material>
+      </visual>
+      <!-- Propeller blade 1 - visible indicator for rotation -->
+      <visual>
+        <origin xyz="0.08 0 0" rpy="1.5708 0 0"/>
+        <geometry><box size="0.15 0.01 0.02"/></geometry>
+        <material name="red_thruster">
+          <color rgba="1.0 0.3 0.3 1.0"/>
+        </material>
+      </visual>
+      <!-- Propeller blade 2 - opposite side -->
+      <visual>
+        <origin xyz="-0.08 0 0" rpy="1.5708 0 0"/>
+        <geometry><box size="0.15 0.01 0.02"/></geometry>
+        <material name="red_thruster">
+          <color rgba="1.0 0.3 0.3 1.0"/>
+        </material>
+      </visual>
+      <!-- Propeller blade 3 - perpendicular -->
+      <visual>
+        <origin xyz="0 0.08 0" rpy="1.5708 0 0"/>
+        <geometry><box size="0.01 0.15 0.02"/></geometry>
+        <material name="red_thruster">
+          <color rgba="1.0 0.3 0.3 1.0"/>
+        </material>
+      </visual>
+      <!-- Propeller blade 4 - opposite -->
+      <visual>
+        <origin xyz="0 -0.08 0" rpy="1.5708 0 0"/>
+        <geometry><box size="0.01 0.15 0.02"/></geometry>
+        <material name="red_thruster">
+          <color rgba="1.0 0.3 0.3 1.0"/>
         </material>
       </visual>
       <collision><origin xyz="0 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
@@ -375,9 +419,44 @@
       <mass value="0.05"/>
       <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
       </inertial>
-      <visual><origin xyz="0 0 0" rpy="1.5708 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry>
+      <!-- Hub/center cylinder -->
+      <visual>
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+        <geometry><cylinder length="0.1" radius="0.015"/></geometry>
         <material name="blue_thruster">
           <color rgba="0.0 0.0 1.0 1.0"/>
+        </material>
+      </visual>
+      <!-- Propeller blade 1 - visible indicator for rotation -->
+      <visual>
+        <origin xyz="0.08 0 0" rpy="1.5708 0 0"/>
+        <geometry><box size="0.15 0.01 0.02"/></geometry>
+        <material name="blue_thruster">
+          <color rgba="0.3 0.3 1.0 1.0"/>
+        </material>
+      </visual>
+      <!-- Propeller blade 2 - opposite side -->
+      <visual>
+        <origin xyz="-0.08 0 0" rpy="1.5708 0 0"/>
+        <geometry><box size="0.15 0.01 0.02"/></geometry>
+        <material name="blue_thruster">
+          <color rgba="0.3 0.3 1.0 1.0"/>
+        </material>
+      </visual>
+      <!-- Propeller blade 3 - perpendicular -->
+      <visual>
+        <origin xyz="0 0.08 0" rpy="1.5708 0 0"/>
+        <geometry><box size="0.01 0.15 0.02"/></geometry>
+        <material name="blue_thruster">
+          <color rgba="0.3 0.3 1.0 1.0"/>
+        </material>
+      </visual>
+      <!-- Propeller blade 4 - opposite -->
+      <visual>
+        <origin xyz="0 -0.08 0" rpy="1.5708 0 0"/>
+        <geometry><box size="0.01 0.15 0.02"/></geometry>
+        <material name="blue_thruster">
+          <color rgba="0.3 0.3 1.0 1.0"/>
         </material>
       </visual>
       <collision><origin xyz="0 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
@@ -396,7 +475,7 @@
     <parent link="base_link_front"/>
     <child  link="thruster_R"/>
     <origin xyz="0.15 0.0 -0.02" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>  <!-- Reverted: Original axis was correct -->
+    <axis xyz="0 1 0"/>  <!-- Normal axis: both axes same, counter-rotation via negative angular velocity -->
     <!-- Continuous joints don't have limits - unlimited rotation for propellers -->
     <dynamics damping="0.0" friction="0.0"/>  <!-- Zero damping to allow full reaction torque visibility -->
   </joint>

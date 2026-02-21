@@ -72,7 +72,7 @@ Collects IMU + altitude (inputs) and ground-truth pose (target) for training a l
 ros2 run marid_logging pose_estimator_logger
 ```
 
-Data is saved to `~/marid_ws/data/marid_pose_imu_altitude_*.npz`. Requires Gazebo simulation with `gazebo_pose_to_odom` publishing `/gazebo/odom`.
+Data is saved to `~/marid_ws/data/marid_pose_imu_altitude_*.npz`. Requires Gazebo simulation with the OdometryPublisher plugin (bridged to `/gazebo/odom`).
 
 This logger is for **Phase 1 (4-D)** pose-from-IMU training. Full 6-D pose (including x, y) uses sequence-based data from `imu_physics_position_logger` or a combined pipeline; see the main repo README for the training and GPS-free workflow.
 
