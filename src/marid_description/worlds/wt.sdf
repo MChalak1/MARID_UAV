@@ -15,19 +15,6 @@
       <render_engine>ogre2</render_engine>
     </plugin>
 
-    <plugin filename="libgz-sim8-pose-publisher-system.so"
-        name="gz::sim::systems::PosePublisher">
-        <publish_model_pose>true</publish_model_pose>
-        <publish_link_pose>true</publish_link_pose>
-        <publish_sensor_pose>false</publish_sensor_pose>
-        <publish_nested_model_pose>false</publish_nested_model_pose>
-
-        <!-- These are the easiest to bridge -->
-        <use_pose_vector_msg>true</use_pose_vector_msg>
-
-        <update_rate>50</update_rate>
-    </plugin>
-
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>
       <world_frame_orientation>ENU</world_frame_orientation>

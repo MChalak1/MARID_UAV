@@ -42,9 +42,9 @@ def generate_launch_description():
         Node(
             package="tf2_ros",
             executable="static_transform_publisher",
-            arguments=["--x", "0", "--y", "0", "--z", "0.8",
+            arguments=["--x", "0", "--y", "0", "--z", "0.02",
                        "--qx", "0", "--qy", "0", "--qz", "0", "--qw", "1",
-                       "--frame-id", "odom",
+                       "--frame-id", "base_link_front",
                        "--child-frame-id", "camera_init"],
         ),
         # FAST-LIO LiDAR-inertial odometry (optional; publishes /Odometry for local EKF)
@@ -75,9 +75,9 @@ def generate_launch_description():
 
         
         # Local EKF - fuses IMU + Barometer + /gazebo/odom (+ FAST-LIO, marid/odom)
-        # Delay startup so /gazebo/odom and other sensors are publishing valid (non-NaN) data
+        # Short delay so /gazebo/odom and other sensors are publishing (bridge uses use_sim_time)
         TimerAction(
-            period=25.0,
+            period=5.0,
             actions=[
         Node(
             package='robot_localization',
@@ -93,9 +93,9 @@ def generate_launch_description():
         ),
         
         # Global EKF - fuses local odometry + GPS
-        # Delay startup after local EKF (local starts at 25s) so map EKF gets /odometry/filtered/local
+        # Delay startup after local EKF (local starts at 5s) so map EKF gets /odometry/filtered/local
         TimerAction(
-            period=40.0,
+            period=20.0,
             actions=[
         Node(
             package='robot_localization',

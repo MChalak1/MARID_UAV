@@ -11,7 +11,7 @@ ekf_filter_node_odom:
     base_link_frame: base_link_front
     world_frame: odom
     
-    # Transform parameters (publish_tf false temporarily to debug NaN TF)
+    # Transform parameters 
     publish_tf: true
     publish_acceleration: false
 
@@ -19,10 +19,10 @@ ekf_filter_node_odom:
     # IMU configuration (from /imu_ekf topic)
     # IMU is REQUIRED for EKF to start publishing TF
     imu0: /imu_ekf
-    imu0_config: [false, false, false,   # IMU does NOT provide position!
-                  false,  false,  false,     # roll, pitch, yaw from Madgwick-filtered IMU
-                  false,  false,  false,   # x_vel, y_vel, z_vel
-                  false, false, false,    # roll_vel, pitch_vel, yaw_vel
+    imu0_config: [false, false, false,      # IMU does NOT provide position
+                  false,  false,  false,       # roll, pitch, yaw from Madgwick-filtered IMU
+                  false,  false,  false,    # x_vel, y_vel, z_vel
+                  false, false, false,      # roll_vel, pitch_vel, yaw_vel
                   false,  false,  false]    # x_accel, y_accel, z_accel
     imu0_differential: false
     imu0_relative: false
@@ -48,9 +48,9 @@ ekf_filter_node_odom:
     
     # Gazebo ground-truth odometry (OdometryPublisher plugin → bridge → /gazebo/odom)
     odom0: /gazebo/odom
-    odom0_config: [true,  true,  true,    # Use X, Y, Z position from Gazebo
-                   true,   true,  true,    # Use roll, pitch, yaw from Gazebo (avoids IMU-only drift)
-                   true,  true,  true,    # Use X, Y, Z velocities
+    odom0_config: [true,  true,  false,      # Use X, Y, Z position from Gazebo
+                   true,   true,  true,     # Use roll, pitch, yaw from Gazebo (avoids IMU-only drift)
+                   true,  true,  true,      # Use X, Y, Z velocities
                    false, false, false,
                    false, false, false]
     odom0_differential: false
