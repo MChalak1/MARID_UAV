@@ -57,6 +57,172 @@
     </collision>
   </link>
 
+  <!--Landing Gears-->
+  <link name="left_front_wheel_arm">
+    <inertial>
+      <mass value="0.005443"/>
+      <origin xyz="0 0 -0.069215" rpy="0 0 0"/>  <!-- CoM from CAD (front_wheel_arm), Z in m -->
+      <inertia ixx="1.756e-6" ixy="0" ixz="0" iyy="2.048e-6" iyz="0" izz="2.926e-7"/>  <!-- From CAD, kg⋅m² -->
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/front_wheel_arm.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/front_wheel_arm.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="left_arm_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="left_front_wheel_arm"/>
+    <origin xyz="-0.053 0.355 -0.069" rpy="0 0 0"/>  <!-- Top of left arm from CAD (min dist), m; Z neg = below origin -->
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="0" effort="1000" velocity="1000"/>
+  </joint>
+
+  <link name="right_front_wheel_arm">
+    <inertial>
+      <mass value="0.005443"/>
+      <origin xyz="0 0 -0.069215" rpy="0 0 0"/>  <!-- CoM from CAD (front_wheel_arm), Z in m -->
+      <inertia ixx="1.756e-6" ixy="0" ixz="0" iyy="2.048e-6" iyz="0" izz="2.926e-7"/>  <!-- From CAD, kg⋅m² -->
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/front_wheel_arm.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/front_wheel_arm.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="right_arm_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="right_front_wheel_arm"/>
+    <origin xyz="0.053 0.355 -0.069" rpy="0 0 0"/>  <!-- Top of right arm from CAD (min dist), m; Z neg = below origin -->
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="0" effort="1000" velocity="1000"/>
+  </joint>
+
+  <link name="left_front_wheel">
+    <inertial>
+      <mass value="0.05"/>  <!-- ~50 g, small landing wheel -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="7.8e-6" ixy="0" ixz="0" iyy="1.56e-5" iyz="0" izz="7.8e-6"/>  <!-- Disk r~0.025 m: I_ax=0.5*m*r^2, I_rad=0.25*m*r^2 -->
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.1016358" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/wheel.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.1016358" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/wheel.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="left_front_wheel_joint" type="continuous">
+    <parent link="left_front_wheel_arm"/>
+    <child link="left_front_wheel"/>
+    <origin xyz="0 0 -0.1016358" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>  <!-- Wheel rotation around own axle (parallel to world X) -->
+    <dynamics damping="0.01" friction="0.0"/>
+  </joint>
+
+  <link name="right_front_wheel">
+    <inertial>
+      <mass value="0.05"/>  <!-- ~50 g, small landing wheel -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="7.8e-6" ixy="0" ixz="0" iyy="1.56e-5" iyz="0" izz="7.8e-6"/>  <!-- Disk r~0.025 m: I_ax=0.5*m*r^2, I_rad=0.25*m*r^2 -->
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.1016358" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/wheel.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.1016358" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/wheel.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="right_front_wheel_joint" type="continuous">
+    <parent link="right_front_wheel_arm"/>
+    <child link="right_front_wheel"/>
+    <origin xyz="0 0 -0.1016358" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>  <!-- Wheel rotation around own axle (parallel to world X) -->
+    <dynamics damping="0.01" friction="0.0"/>
+  </joint>
+
+  <link name="rear_wheel_arm">
+    <inertial>
+      <mass value="0.010886"/>
+      <origin xyz="0 0 -0.058191" rpy="0 0 0"/>  <!-- CoM from CAD (rear_arm), Z in m -->
+      <inertia ixx="6.145e-6" ixy="0" ixz="0" iyy="7.316e-6" iyz="0" izz="1.463e-6"/>  <!-- From CAD, kg⋅m² -->
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/rear_wheel_arm.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/rear_wheel_arm.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="rear_arm_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="rear_wheel_arm"/>
+    <origin xyz="0 -0.28 -0.055" rpy="0 0 0"/>  <!-- Rear arm -->
+  </joint>
+
+  <link name="rear_wheel">
+    <inertial>
+      <mass value="0.05"/>  <!-- ~50 g, small landing wheel -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="7.8e-6" ixy="0" ixz="0" iyy="1.56e-5" iyz="0" izz="7.8e-6"/>  <!-- Disk r~0.025 m -->
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.1016358" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/wheel.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.1016358" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes/wheel.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="rear_wheel_joint" type="continuous">
+    <parent link="rear_wheel_arm"/>
+    <child link="rear_wheel"/>
+    <origin xyz="0 0 -0.1016358" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>  <!-- Wheel rotation around own axle (parallel to world X) -->
+    <dynamics damping="0.01" friction="0.0"/>
+  </joint>
 
   <link name="main_tail">
     <inertial>
@@ -368,49 +534,9 @@
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="0.05"/>
-      
       <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
-      </inertial>
-      <!-- Hub/center cylinder -->
-      <visual>
-        <origin xyz="0 0 0" rpy="1.5708 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry>
-        <material name="red_thruster">
-          <color rgba="1.0 0.0 0.0 1.0"/>
-        </material>
-      </visual>
-      <!-- Propeller blade 1 - visible indicator for rotation -->
-      <visual>
-        <origin xyz="0.08 0 0" rpy="1.5708 0 0"/>
-        <geometry><box size="0.15 0.01 0.02"/></geometry>
-        <material name="red_thruster">
-          <color rgba="1.0 0.3 0.3 1.0"/>
-        </material>
-      </visual>
-      <!-- Propeller blade 2 - opposite side -->
-      <visual>
-        <origin xyz="-0.08 0 0" rpy="1.5708 0 0"/>
-        <geometry><box size="0.15 0.01 0.02"/></geometry>
-        <material name="red_thruster">
-          <color rgba="1.0 0.3 0.3 1.0"/>
-        </material>
-      </visual>
-      <!-- Propeller blade 3 - perpendicular -->
-      <visual>
-        <origin xyz="0 0.08 0" rpy="1.5708 0 0"/>
-        <geometry><box size="0.01 0.15 0.02"/></geometry>
-        <material name="red_thruster">
-          <color rgba="1.0 0.3 0.3 1.0"/>
-        </material>
-      </visual>
-      <!-- Propeller blade 4 - opposite -->
-      <visual>
-        <origin xyz="0 -0.08 0" rpy="1.5708 0 0"/>
-        <geometry><box size="0.01 0.15 0.02"/></geometry>
-        <material name="red_thruster">
-          <color rgba="1.0 0.3 0.3 1.0"/>
-        </material>
-      </visual>
-      <collision><origin xyz="0 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
+    </inertial>
+    <collision><origin xyz="0 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
   </link>
 
   <link name="thruster_R">
@@ -418,48 +544,8 @@
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="0.05"/>
       <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
-      </inertial>
-      <!-- Hub/center cylinder -->
-      <visual>
-        <origin xyz="0 0 0" rpy="1.5708 0 0"/>
-        <geometry><cylinder length="0.1" radius="0.015"/></geometry>
-        <material name="blue_thruster">
-          <color rgba="0.0 0.0 1.0 1.0"/>
-        </material>
-      </visual>
-      <!-- Propeller blade 1 - visible indicator for rotation -->
-      <visual>
-        <origin xyz="0.08 0 0" rpy="1.5708 0 0"/>
-        <geometry><box size="0.15 0.01 0.02"/></geometry>
-        <material name="blue_thruster">
-          <color rgba="0.3 0.3 1.0 1.0"/>
-        </material>
-      </visual>
-      <!-- Propeller blade 2 - opposite side -->
-      <visual>
-        <origin xyz="-0.08 0 0" rpy="1.5708 0 0"/>
-        <geometry><box size="0.15 0.01 0.02"/></geometry>
-        <material name="blue_thruster">
-          <color rgba="0.3 0.3 1.0 1.0"/>
-        </material>
-      </visual>
-      <!-- Propeller blade 3 - perpendicular -->
-      <visual>
-        <origin xyz="0 0.08 0" rpy="1.5708 0 0"/>
-        <geometry><box size="0.01 0.15 0.02"/></geometry>
-        <material name="blue_thruster">
-          <color rgba="0.3 0.3 1.0 1.0"/>
-        </material>
-      </visual>
-      <!-- Propeller blade 4 - opposite -->
-      <visual>
-        <origin xyz="0 -0.08 0" rpy="1.5708 0 0"/>
-        <geometry><box size="0.01 0.15 0.02"/></geometry>
-        <material name="blue_thruster">
-          <color rgba="0.3 0.3 1.0 1.0"/>
-        </material>
-      </visual>
-      <collision><origin xyz="0 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
+    </inertial>
+    <collision><origin xyz="0 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
   </link>
 
   <joint name="thruster_L_joint" type="continuous">

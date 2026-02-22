@@ -41,12 +41,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'use_center_thruster',
-            default_value='false',
+            default_value='true',
             description='Use single center thruster (true) or dual left/right (false)'
         ),
         DeclareLaunchArgument(
             'initial_thrust',
-            default_value='1.0',
+            default_value='10.0',
             description='Initial thrust in Newtons'
         ),
         # Use OpaqueFunction to access launch arguments and convert to floats
@@ -59,8 +59,8 @@ def launch_setup(context):
     destination_lon = float(context.launch_configurations['destination_longitude'])
     destination_x = float(context.launch_configurations.get('destination_x', '-1.0'))
     destination_y = float(context.launch_configurations.get('destination_y', '-1.0'))
-    use_center_thruster = context.launch_configurations.get('use_center_thruster', 'false').lower() == 'true'
-    initial_thrust = float(context.launch_configurations.get('initial_thrust', '1.0'))
+    use_center_thruster = context.launch_configurations.get('use_center_thruster', 'true').lower() == 'true'
+    initial_thrust = float(context.launch_configurations.get('initial_thrust', '10.0'))
     datum_lat = 37.4  # Match Gazebo world origin (wt.sdf)
     datum_lon = -122.1
     
