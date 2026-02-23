@@ -57,7 +57,7 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: true
-        base_footprint:
+        base_link_front:
           Value: true
         base_link:
           Value: true
@@ -71,7 +71,7 @@ Visualization Manager:
       Show Axes: true
       Show Names: false
       Tree:
-        base_footprint:
+        base_link_front:
           base_link:
             left_wing:
               {}
@@ -97,7 +97,7 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
-        base_footprint:
+        base_link_front:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -127,7 +127,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: base_footprint
+    Fixed Frame: base_link_front
     Frame Rate: 30
   Name: root
   Tools:

@@ -44,7 +44,7 @@ def generate_launch_description():
 
 
     world_path = os.path.join(get_package_share_directory("marid_description"),
-                          "worlds", "empty.sdf")
+                          "worlds", "lift_drag_world.sdf")
 
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
@@ -69,7 +69,9 @@ def generate_launch_description():
         output="screen",
         arguments=["-topic", "robot_description",
                    "-name", "marid",
-                   "-z", "1.0"]
+                   "-x", "2",
+                   "-y", "-2",
+                   "-z", "0.2"]
             )
         ]
     )
@@ -89,11 +91,10 @@ def generate_launch_description():
         "/baro/pressure@sensor_msgs/msg/FluidPressure[gz.msgs.FluidPressure",
         "/gps/fix@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat",
         "/world/wt/state@gz.msgs.World[gz.msgs.World",
-        # Bridge thruster command topics (ROS2 -> Gazebo Transport)
-        # Note: ] means ROS2 -> Gazebo, [ means Gazebo -> ROS2
-        "/model/marid/joint/thruster_L_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-        "/model/marid/joint/thruster_R_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-        "/model/marid/joint/thruster_center_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
+        # Bridge thruster force commands (ROS2 -> Gazebo) for Thruster plugin; force in Newtons (Float64 -> Double)
+        "/model/marid/joint/thruster_center_joint/cmd_thrust@std_msgs/msg/Float64]gz.msgs.Double",
+        "/model/marid/joint/thruster_L_joint/cmd_thrust@std_msgs/msg/Float64]gz.msgs.Double",
+        "/model/marid/joint/thruster_R_joint/cmd_thrust@std_msgs/msg/Float64]gz.msgs.Double",
         # Bridge wing and tail joint command topics (ROS2 -> Gazebo Transport)
         # Using custom topic names without /0/ to be ROS2-compatible
         "/model/marid/joint/left_wing_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",

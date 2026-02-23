@@ -143,33 +143,28 @@ class MaridThrustController(Node):
         # Differential thrust for yaw control (will be set by attitude controller)
         self.yaw_differential_ = 0.0  # -1.0 to 1.0, negative = yaw left, positive = yaw right
         
-        # Publishers for thruster angular velocity commands (if using Thruster plugin)
-        # Note: Gazebo Sim 8 Thruster plugin uses default topic pattern:
-        # /model/{namespace}/joint/{joint_name}/cmd_vel (when use_angvel_cmd=true)
+        # Publishers for Gazebo Thruster plugin: force in Newtons (Float64) per thruster; bridged to gz.msgs.Double
         if self.use_thruster_plugin_:
+            self.thrust_center_pub_ = self.create_publisher(
+                Float64,
+                '/model/marid/joint/thruster_center_joint/cmd_thrust',
+                10
+            )
+            self.thrust_left_pub_ = self.create_publisher(
+                Float64,
+                '/model/marid/joint/thruster_L_joint/cmd_thrust',
+                10
+            )
+            self.thrust_right_pub_ = self.create_publisher(
+                Float64,
+                '/model/marid/joint/thruster_R_joint/cmd_thrust',
+                10
+            )
             if self.use_center_thruster_:
-                # Single center thruster mode
-                self.center_thruster_cmd_pub_ = self.create_publisher(
-                    Float64,
-                    '/model/marid/joint/thruster_center_joint/cmd_vel',
-                    10
-                )
-                self.get_logger().info('Using Gazebo Thruster plugin - CENTER THRUSTER MODE (single thruster at COM)')
-                self.get_logger().info('Publishing to: /model/marid/joint/thruster_center_joint/cmd_vel')
+                self.get_logger().info('Using Thruster plugin - CENTER THRUSTER MODE (force in N)')
             else:
-                # Dual thruster mode (left/right)
-                self.left_thruster_cmd_pub_ = self.create_publisher(
-                    Float64,
-                    '/model/marid/joint/thruster_L_joint/cmd_vel',
-                    10
-                )
-                self.right_thruster_cmd_pub_ = self.create_publisher(
-                    Float64,
-                    '/model/marid/joint/thruster_R_joint/cmd_vel',
-                    10
-                )
-                self.get_logger().info('Using Gazebo Thruster plugin - DUAL THRUSTER MODE (left/right)')
-                self.get_logger().info('Publishing to: /model/marid/joint/thruster_L_joint/cmd_vel and /model/marid/joint/thruster_R_joint/cmd_vel')
+                self.get_logger().info('Using Thruster plugin - DUAL THRUSTER MODE (left + right, force in N)')
+            self.get_logger().info('Publishing force (N) to cmd_thrust topics')
         else:
             # Legacy: Use ApplyLinkWrench plugin (in world) via direct gz topic publishing
             # Use persistent topic (applies continuously until cleared or updated)
@@ -257,8 +252,7 @@ class MaridThrustController(Node):
         self.get_logger().info(f'Thrust rate limit: {self.thrust_rate_limit_:.1f} N/s')
         self.get_logger().info(f'Thrust smoothing factor: {self.thrust_smoothing_factor_:.2f}')
         if self.use_thruster_plugin_:
-            self.get_logger().info(f'Thrust-to-angular-velocity gain: {self.thrust_to_angvel_gain_:.2f}')
-            self.get_logger().info('Publishing angular velocity commands to Gazebo Thruster plugins')
+            self.get_logger().info('Publishing force (N) to Gazebo Thruster plugins (cmd_thrust)')
         else:
             self.get_logger().info(f'Using ApplyLinkWrench plugin via: {self.wrench_topic_}')
             self.get_logger().info(f'Entity ID: 11 (base_link_front)')
@@ -503,13 +497,13 @@ class MaridThrustController(Node):
             self.last_published_center_ = center_thrust
             
             if self.use_thruster_plugin_:
-                # Convert thrust (N) to angular velocity (rad/s)
-                center_omega = self.thrust_to_angvel_gain_ * math.sqrt(max(0.0, center_thrust))
-                
-                # Publish angular velocity command
-                center_cmd = Float64()
-                center_cmd.data = center_omega
-                self.center_thruster_cmd_pub_.publish(center_cmd)
+                # Thruster plugin: publish force in Newtons directly
+                msg = Float64()
+                msg.data = float(max(0.0, center_thrust))
+                self.thrust_center_pub_.publish(msg)
+                # Zero the other two (optional, they may default to 0)
+                self.thrust_left_pub_.publish(Float64(data=0.0))
+                self.thrust_right_pub_.publish(Float64(data=0.0))
             return  # Exit early for center thruster mode
         
         # Dual thruster mode (original logic)
@@ -552,37 +546,19 @@ class MaridThrustController(Node):
         self.last_published_right_ = right_thrust
         
         if self.use_thruster_plugin_:
-            # ===== NEW: Use Gazebo Thruster Plugin =====
-            # Convert thrust (N) to angular velocity (rad/s)
-            # Simplified model: omega = gain * sqrt(thrust)
-            # More realistic would account for propeller diameter, density, etc.
-            # The gain parameter can be tuned based on testing
-            left_omega = self.thrust_to_angvel_gain_ * math.sqrt(max(0.0, left_thrust))
-            # Both thrusters have normal joint axis (xyz="0 1 0") and positive coefficients
-            # Both receive positive angular velocity - same rotation direction
-            # Reaction torques will need to be compensated via aerodynamic control surfaces
-            right_omega = self.thrust_to_angvel_gain_ * math.sqrt(max(0.0, right_thrust))
+            # Thruster plugin: publish force in Newtons directly
+            self.thrust_center_pub_.publish(Float64(data=0.0))
+            self.thrust_left_pub_.publish(Float64(data=float(max(0.0, left_thrust))))
+            self.thrust_right_pub_.publish(Float64(data=float(max(0.0, right_thrust))))
             
-            # Publish angular velocity commands
-            left_cmd = Float64()
-            left_cmd.data = left_omega
-            self.left_thruster_cmd_pub_.publish(left_cmd)
-            
-            right_cmd = Float64()
-            right_cmd.data = right_omega
-            self.right_thruster_cmd_pub_.publish(right_cmd)
-            
-            # Log periodically (every 50 calls at 50 Hz = every 1 second)
             if not hasattr(self, '_thruster_log_counter'):
                 self._thruster_log_counter = 0
             self._thruster_log_counter += 1
-            
             if self._thruster_log_counter == 1:
-                self.get_logger().info('Thruster commands published successfully! Both thrusters rotating in same direction - reaction torques compensated aerodynamically.')
+                self.get_logger().info('Thrust commands published (Thruster plugin, force in N).')
             elif self._thruster_log_counter % 50 == 0:
                 self.get_logger().debug(
-                    f'Thruster commands: L={left_thrust:.2f}N→{left_omega:.1f}rad/s, '
-                    f'R={right_thrust:.2f}N→{right_omega:.1f}rad/s (counter-rotating)'
+                    f'Thrust: L={left_thrust:.2f}N, R={right_thrust:.2f}N'
                 )
         else:
             # ===== LEGACY: Use ApplyLinkWrench Plugin =====
