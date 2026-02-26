@@ -25,6 +25,7 @@ class MaridOdomPublisher(Node):
         self.declare_parameter("base_velocity_variance", 0.1)
         self.declare_parameter("variance_growth_rate", 0.001)  # per second
         self.declare_parameter("child_frame_id", "base_link_front")
+        self.declare_parameter("publish_tf", True)
         
         # Get parameters
         self.accel_is_sf_ = self.get_parameter("imu_outputs_specific_force").value

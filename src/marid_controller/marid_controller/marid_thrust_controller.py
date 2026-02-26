@@ -143,7 +143,7 @@ class MaridThrustController(Node):
         # Differential thrust for yaw control (will be set by attitude controller)
         self.yaw_differential_ = 0.0  # -1.0 to 1.0, negative = yaw left, positive = yaw right
         
-        # Publishers for Gazebo Thruster plugin: force in Newtons (Float64) per thruster; bridged to gz.msgs.Double
+        # Publishers: Thruster plugin (force in N) for center and L/R
         if self.use_thruster_plugin_:
             self.thrust_center_pub_ = self.create_publisher(
                 Float64,
@@ -161,10 +161,9 @@ class MaridThrustController(Node):
                 10
             )
             if self.use_center_thruster_:
-                self.get_logger().info('Using Thruster plugin - CENTER THRUSTER MODE (force in N)')
+                self.get_logger().info('Using Thruster plugin - CENTER (force in N)')
             else:
-                self.get_logger().info('Using Thruster plugin - DUAL THRUSTER MODE (left + right, force in N)')
-            self.get_logger().info('Publishing force (N) to cmd_thrust topics')
+                self.get_logger().info('Using Thruster plugin - DUAL (left + right, force in N)')
         else:
             # Legacy: Use ApplyLinkWrench plugin (in world) via direct gz topic publishing
             # Use persistent topic (applies continuously until cleared or updated)
@@ -497,11 +496,10 @@ class MaridThrustController(Node):
             self.last_published_center_ = center_thrust
             
             if self.use_thruster_plugin_:
-                # Thruster plugin: publish force in Newtons directly
+                # Thruster plugin: publish force in N (axis 0 1 0 = force +Y forward)
                 msg = Float64()
-                msg.data = float(max(0.0, center_thrust))
+                msg.data = float(max(0.0, max(self.min_thrust_, min(self.max_thrust_, center_thrust))))
                 self.thrust_center_pub_.publish(msg)
-                # Zero the other two (optional, they may default to 0)
                 self.thrust_left_pub_.publish(Float64(data=0.0))
                 self.thrust_right_pub_.publish(Float64(data=0.0))
             return  # Exit early for center thruster mode
@@ -546,7 +544,6 @@ class MaridThrustController(Node):
         self.last_published_right_ = right_thrust
         
         if self.use_thruster_plugin_:
-            # Thruster plugin: publish force in Newtons directly
             self.thrust_center_pub_.publish(Float64(data=0.0))
             self.thrust_left_pub_.publish(Float64(data=float(max(0.0, left_thrust))))
             self.thrust_right_pub_.publish(Float64(data=float(max(0.0, right_thrust))))

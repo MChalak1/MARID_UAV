@@ -15,7 +15,7 @@ def generate_launch_description():
     marid_description = get_package_share_directory("marid_description")
 
     model_arg = DeclareLaunchArgument(name="model", default_value=os.path.join(
-                                        marid_description, "urdf", "marid.urdf.xacro"
+                                        marid_description, "urdf", "marid_new.urdf.xacro"
                                         ),
                                       description="Absolute path to robot urdf file"
     )
@@ -74,9 +74,8 @@ def generate_launch_description():
         output="screen",
         arguments=["-topic", "robot_description",
                    "-name", "marid",
-                   "-x", "2",
-                   "-y", "-2",
-                   "-z", "0.2"]
+                   "-z", "0.2",
+                   ]
             )
         ]
     )
@@ -95,7 +94,7 @@ def generate_launch_description():
         "/model/marid/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry",
         "/baro/pressure@sensor_msgs/msg/FluidPressure[gz.msgs.FluidPressure",
         "/gps/fix@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat",
-        "/world/wt/state@gz.msgs.World[gz.msgs.World",
+        "/world/empty/state@gz.msgs.World[gz.msgs.World",  # Must match default world (empty.sdf); change if using another world
         # Thruster plugins: force in N
         "/model/marid/joint/thruster_center_joint/cmd_thrust@std_msgs/msg/Float64]gz.msgs.Double",
         "/model/marid/joint/thruster_L_joint/cmd_thrust@std_msgs/msg/Float64]gz.msgs.Double",

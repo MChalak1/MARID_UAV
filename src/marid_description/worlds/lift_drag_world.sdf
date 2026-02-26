@@ -763,7 +763,9 @@
           <Cen_ctrl>0.0</Cen_ctrl>
         </control_surface>
         <control_surface>
-          <name>servo_3</name>b
+          <name>servo_3</name>
+          <index>3</index>
+          <direction>1</direction>
           <CD_ctrl>0.0</CD_ctrl>
           <CY_ctrl>-0.003913</CY_ctrl>
           <CL_ctrl>0.0</CL_ctrl>

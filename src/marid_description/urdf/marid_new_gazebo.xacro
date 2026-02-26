@@ -42,6 +42,33 @@
         <maxVel>0.1</maxVel>
     </gazebo>
 
+    <!-- Wheels: higher friction and damping to prevent slipping on ground during taxiing -->
+    <gazebo reference="left_front_wheel">
+        <mu1>0.9</mu1>
+        <mu2>0.9</mu2>
+        <kp>2e5</kp>
+        <kd>2e3</kd>
+        <minDepth>0.001</minDepth>
+        <maxVel>0.2</maxVel>
+    </gazebo>
+
+    <gazebo reference="right_front_wheel">
+        <mu1>0.9</mu1>
+        <mu2>0.9</mu2>
+        <kp>2e5</kp>
+        <kd>2e3</kd>
+        <minDepth>0.001</minDepth>
+        <maxVel>0.2</maxVel>
+    </gazebo>
+
+        <gazebo reference="rear_wheel">
+          <mu1>0.9</mu1>
+          <mu2>0.9</mu2>
+          <kp>2e5</kp>
+          <kd>2e3</kd>
+          <minDepth>0.001</minDepth>
+          <maxVel>0.2</maxVel>
+      </gazebo>
 
     <!-- Aircraft-level aerodynamic model: AdvancedLiftDrag (single plugin) -->
     <gazebo>
@@ -55,7 +82,7 @@
             <eff>0.97</eff>
             <CLa>5.015</CLa>
             <CD0>0.04</CD0>
-            <Cem0>-0.03</Cem0>   <!-- Flipped for Y-forward: reduce nose-down tendency -->
+            <Cem0>-0.03</Cem0>   <!-- Flipped for X-forward: reduce nose-down tendency -->
             <Cema>0.463966</Cema>
             <CYb>-0.258244</CYb>
             <Cellb>-0.03925</Cellb>
@@ -83,14 +110,14 @@
             <CDa_stall>-0.9233984055</CDa_stall>
             <Cema_stall>0</Cema_stall>
 
-            <!-- Aerodynamic reference geometry (approximate, to be tuned) -->
+            <!-- Aerodynamic reference geometry (scaled for larger MARID airframe) -->
             <cp>0 0 0</cp>          <!-- Aerodynamic center in base_link_front frame -->
-            <area>0.4135</area>       <!-- Reference area (m²) for MARID aero model -->
-            <mac>0.22</mac>        <!-- Mean aerodynamic chord (m) -->
+            <area>2.0</area>        <!-- Reference area (m²) - scaled up for bigger drone -->
+            <mac>0.35</mac>         <!-- Mean aerodynamic chord (m) - scaled for bigger drone -->
             <air_density>1.225</air_density>
 
-            <!-- MARID coordinate convention: Y forward, Z up -->
-            <forward>0 1 0</forward>
+            <!-- MARID coordinate convention: X forward, Z up -->
+            <forward>1 0 0</forward>
             <upward>0 0 1</upward>
 
             <!-- Use the main fuselage link as the aero body -->
@@ -161,71 +188,70 @@
 
 
     <!-- Aerodynamic Damping for Main Body (prevents uncontrolled rotations and drift) -->
+    <!-- X-forward convention: X = forward, Y = lateral, Z = up -->
     <gazebo reference="base_link_front">
         <plugin filename="libgz-sim8-hydrodynamics-system.so" 
                 name="gz::sim::systems::Hydrodynamics">
             <link_name>base_link_front</link_name>
             
-            <!-- Linear drag coefficients (X, Y, Z) - acts like air resistance -->
-            <xDotU>-0.5</xDotU>    <!-- Forward drag (X-axis) -->
-            <yDotV>-1.0</yDotV>    <!-- Side drag (Y-axis - your forward) -->
-            <zDotW>-1.0</zDotW>    <!-- Vertical drag (Z-axis) -->
+            <!-- Linear drag (X, Y, Z) - X forward, scaled up for bigger drone -->
+            <xDotU>-1.0</xDotU>    <!-- Forward drag (X-axis) -->
+            <yDotV>-0.5</yDotV>    <!-- Lateral drag (Y-axis) -->
+            <zDotW>-1.2</zDotW>    <!-- Vertical drag (Z-axis) -->
             
-            <!-- Angular drag coefficients (Roll, Pitch, Yaw) - rotational damping -->
-            <kDotP>-2.0</kDotP>    <!-- Roll damping (around X) -->
-            <mDotQ>-2.0</mDotQ>     <!-- Pitch damping (around Y) -->
-            <nDotR>-2.0</nDotR>     <!-- Yaw damping (around Z) -->
+            <!-- Angular drag - increased for larger vehicle -->
+            <kDotP>-4.0</kDotP>    <!-- Roll damping (around X) -->
+            <mDotQ>-4.0</mDotQ>    <!-- Pitch damping (around Y) -->
+            <nDotR>-4.0</nDotR>    <!-- Yaw damping (around Z) -->
             
-            <!-- Quadratic drag (velocity-squared terms) -->
-            <xUabsU>-0.1</xUabsU>   <!-- Forward quadratic drag -->
-            <yVabsV>-0.2</yVabsV>   <!-- Side quadratic drag -->
-            <zWabsW>-0.2</zWabsW>   <!-- Vertical quadratic drag -->
-            <kPabsP>-1.0</kPabsP>  <!-- Roll quadratic damping -->
-            <mQabsQ>-1.0</mQabsQ>  <!-- Pitch quadratic damping -->
-            <nRabsR>-1.0</nRabsR>  <!-- Yaw quadratic damping -->
+            <!-- Quadratic drag (velocity-squared) -->
+            <xUabsU>-0.12</xUabsU>   <!-- Forward (X) quadratic drag -->
+            <yVabsV>-0.35</yVabsV>   <!-- Lateral (Y) quadratic drag -->
+            <zWabsW>-0.4</zWabsW>    <!-- Vertical quadratic drag -->
+            <kPabsP>-2.0</kPabsP>    <!-- Roll quadratic damping -->
+            <mQabsQ>-2.0</mQabsQ>    <!-- Pitch quadratic damping -->
+            <nRabsR>-2.0</nRabsR>    <!-- Yaw quadratic damping -->
             
-            <!-- Linear velocity terms (usually zero for air) -->
-            <!-- Y-forward vehicle: treat sway (Y) as forward -->
-            <xU>-6.0</xU>         <!-- lateral -->
-            <yV>-1.5</yV>         <!-- forward -->
-            <zW>-6.0</zW>
-
-            <xUabsU>-0.35</xUabsU>
-            <yVabsV>-0.12</yVabsV>
-            <zWabsW>-0.35</zWabsW>
+            <!-- Linear velocity terms (X-forward) -->
+            <xU>-1.5</xU>         <!-- forward (X) -->
+            <yV>-6.0</yV>         <!-- lateral (Y) -->
+            <zW>-6.0</zW>         <!-- vertical (Z) -->
             <kP>0</kP>
             <mQ>0</mQ>
             <nR>0</nR>
         </plugin>
     </gazebo>
 
-    <!-- ===== CENTER: Thruster plugin (force in N) ===== -->
+    <!-- ===== CENTER: Thruster plugin (force in N) - scaled for bigger drone, CCW rotation ===== -->
     <gazebo>
         <plugin filename="libgz-sim8-thruster-system.so" name="gz::sim::systems::Thruster">
             <joint_name>thruster_center_joint</joint_name>
             <fluid_density>1.204</fluid_density>
-            <propeller_diameter>0.03</propeller_diameter>
-            <!-- Positive thrust_coefficient: CW rotor under positive thrust (per Thruster docs) -->
-            <thrust_coefficient>1.0</thrust_coefficient>
+            <propeller_diameter>0.5</propeller_diameter>
+            <thrust_coefficient>1.0</thrust_coefficient>  <!-- Positive = CW when viewed stern (-X) to bow (+X); negative = CCW -->
+            <max_thrust_cmd>10000</max_thrust_cmd>
+            <min_thrust_cmd>0</min_thrust_cmd>
         </plugin>
     </gazebo>
 
     <!-- ===== LEFT/RIGHT: Thruster plugin (force in Newtons) ===== -->
-    <!-- Left: topic /model/marid/joint/thruster_L_joint/cmd_thrust -->
     <gazebo>
         <plugin filename="libgz-sim8-thruster-system.so" name="gz::sim::systems::Thruster">
             <joint_name>thruster_L_joint</joint_name>
             <fluid_density>1.204</fluid_density>
-            <propeller_diameter>0.03</propeller_diameter>
+            <propeller_diameter>0.08</propeller_diameter>
+            <max_thrust_cmd>5000</max_thrust_cmd>
+            <min_thrust_cmd>0</min_thrust_cmd>
         </plugin>
     </gazebo>
 
-    <!-- Right: topic /model/marid/joint/thruster_R_joint/cmd_thrust -->
     <gazebo>
         <plugin filename="libgz-sim8-thruster-system.so" name="gz::sim::systems::Thruster">
             <joint_name>thruster_R_joint</joint_name>
             <fluid_density>1.204</fluid_density>
-            <propeller_diameter>0.03</propeller_diameter>
+            <propeller_diameter>0.08</propeller_diameter>
+            <max_thrust_cmd>5000</max_thrust_cmd>
+            <min_thrust_cmd>0</min_thrust_cmd>
         </plugin>
     </gazebo>
 
@@ -238,25 +264,26 @@
             <turningDirection>cw</turningDirection>
             <timeConstantUp>0.0125</timeConstantUp>
             <timeConstantDown>0.025</timeConstantDown>
-            <maxRotVelocity>8000</maxRotVelocity>
+            <maxRotVelocity>80000</maxRotVelocity>
             <motorConstant>8.54858e-06</motorConstant>
             <momentConstant>0.01</momentConstant>
             <commandSubTopic>command/motor_speed_nose</commandSubTopic>
             <motorNumber>0</motorNumber>
             <rotorDragCoefficient>8.06428e-05</rotorDragCoefficient>
             <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
-            <rotorVelocitySlowdownSim>1</rotorVelocitySlowdownSim>
+            <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
             <motorType>velocity</motorType>
         </plugin>
     </gazebo>
 
     <!-- ===== JOINT POSITION CONTROLLERS FOR CONTROL SURFACES ===== -->
+    <!-- P-gain raised to overcome 150 N·m joint friction (wings/tails) for bigger drone -->
     <!-- Left Wing Position Controller -->
     <gazebo>
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>left_wing_joint</joint_name>
-            <p_gain>15.0</p_gain>  <!-- Increased to overcome damping (2.5) + friction (1.0) for servo-like behavior -->
+            <p_gain>80.0</p_gain>
             <topic>/model/marid/joint/left_wing_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
@@ -266,7 +293,7 @@
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>right_wing_joint</joint_name>
-            <p_gain>15.0</p_gain>  <!-- Increased to overcome damping (2.5) + friction (1.0) for servo-like behavior -->
+            <p_gain>80.0</p_gain>
             <topic>/model/marid/joint/right_wing_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
@@ -276,7 +303,7 @@
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>tail_left_joint</joint_name>
-            <p_gain>15.0</p_gain>  <!-- Increased to overcome damping (2.5) + friction (1.0) for servo-like behavior -->
+            <p_gain>80.0</p_gain>
             <topic>/model/marid/joint/tail_left_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
@@ -286,7 +313,7 @@
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>tail_right_joint</joint_name>
-            <p_gain>15.0</p_gain>  <!-- Increased to overcome damping (2.5) + friction (1.0) for servo-like behavior -->
+            <p_gain>80.0</p_gain>
             <topic>/model/marid/joint/tail_right_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
