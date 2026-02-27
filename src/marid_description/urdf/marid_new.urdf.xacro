@@ -9,23 +9,15 @@
   <!-- ROS2 Control Library-->
   <xacro:include filename="$(find marid_description)/urdf/marid_ros2_control.xacro"/>
 
+  
+  <!-- Joint origins at the desired rotation axis location; inertial origin = CoM in link frame (computed from joint origin) -->
+  <xacro:property name="left_wing_inertial" value="-0.50031399 0.61004875 -0.02410637"/>
+  <xacro:property name="right_wing_inertial" value="-0.50031399 -0.61004875 -0.02410637"/>
+  <!-- Tail V-surfaces: inertial origin = CoM in tail link frame.-->
+  <xacro:property name="tail_left_inertial" value="-0.12167064 0.13072223 0.12984906"/>
+  <xacro:property name="tail_right_inertial" value="-0.12167064 -0.13072223 0.12984906"/>
 
-  <!-- Axis translation along y - adjust this value as needed -->
-  <xacro:property name="axis_offset_y" value="0.1"/>
-  
-  <!-- Joint origins at the desired rotation axis location -->
-  <xacro:property name="left_wing_xyz" value="0.0 ${0.18 + axis_offset_y} -0.04"/>
-  <xacro:property name="left_wing_rpy" value="0.0 0.0 0.0"/>
-  <xacro:property name="right_wing_xyz" value="0.0 ${0.18 + axis_offset_y} -0.04"/>
-  <xacro:property name="right_wing_rpy" value="0.0 0.0 0.0"/>
-  
-  <!-- Offset for wing geometry relative to joint (to keep wing in original position) -->
-  <xacro:property name="left_wing_offset" value="0.0 ${-axis_offset_y} 0.0"/>
-  <xacro:property name="right_wing_offset" value="0.0 ${-axis_offset_y} 0.0"/>
-  
-  <xacro:property name="wing_axis" value="1 0 0"/>
 
-  <!-- Root link (spawn height set by launch file, e.g. -z 1.0) -->
   <link name="base_link_front">  
     <inertial>
       <mass value="84.735"/> 
@@ -111,7 +103,7 @@
   <link name="left_front_wheel">
     <inertial>
       <mass value="0.934"/>
-      <origin xyz="0.525 -0.20786886 0.09000082" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <inertia ixx="0.0036" ixy="0" ixz="0" iyy="0.007" iyz="0" izz="0.0036"/>
     </inertial>
     <visual>
@@ -131,7 +123,7 @@
     </collision>
   </link>
 
-  <joint name="left_front_wheel_joint" type="fixed">  <!-- fixed for testing (was continuous) -->
+  <joint name="left_front_wheel_joint" type="fixed">
     <parent link="left_front_wheel_arm"/>
     <child link="left_front_wheel"/>
     <origin xyz="-0.525 0.20786886 -0.09000082" rpy="0 0 0"/>
@@ -140,7 +132,7 @@
   <link name="right_front_wheel">
     <inertial>
       <mass value="0.934"/>
-      <origin xyz="0.525 0.20786886 0.09000082" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <inertia ixx="0.0036" ixy="0" ixz="0" iyy="0.007" iyz="0" izz="0.0036"/>
     </inertial>
     <visual>
@@ -160,7 +152,7 @@
     </collision>
   </link>
 
-  <joint name="right_front_wheel_joint" type="fixed">  <!-- fixed for testing (was continuous) -->
+  <joint name="right_front_wheel_joint" type="fixed">
     <parent link="right_front_wheel_arm"/>
     <child link="right_front_wheel"/>
     <origin xyz="-0.525 -0.20786886 -0.09000082" rpy="0 0 0"/>
@@ -198,7 +190,7 @@
   <link name="rear_wheel">
     <inertial>
       <mass value="0.573"/>
-      <origin xyz="2.475 0 0.02500082" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <inertia ixx="0.0016" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.0016"/>
     </inertial>
     <visual>
@@ -218,7 +210,7 @@
     </collision>
   </link>
 
-  <joint name="rear_wheel_joint" type="fixed">  <!-- fixed for testing (was continuous) -->
+  <joint name="rear_wheel_joint" type="fixed">
     <parent link="rear_wheel_arm"/>
     <child link="rear_wheel"/>
     <origin xyz="-2.475 0 -0.02500082" rpy="0 0 0"/>
@@ -258,7 +250,7 @@
   
   <link name="left_wing">
     <inertial>
-      <origin xyz="-1.72531399 1.11004875 0.18389363" rpy="0 0 0"/>
+      <origin xyz="${left_wing_inertial}" rpy="0 0 0"/>
       <mass value="3.662"/>
       <inertia ixx="0.55" ixy="0.54" ixz="-0.022" iyy="0.662" iyz="0.021" izz="1.202"/>
     </inertial>
@@ -284,7 +276,7 @@
     <child link="left_wing"/>
     <origin xyz="-1.225 0.5 0.208" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <dynamics damping="2.5" friction="3000.0"/>  <!-- Increased friction for heavier wing -->
+    <dynamics damping="2.5" friction="10.0"/>  <!-- Lower friction; wing mass/inertia + aero carry the load -->
     <sensor name="left_wing_ft" type="force_torque">
       <update_rate>1</update_rate>
       <force_torque>
@@ -293,12 +285,12 @@
       </force_torque>
       <topic>/marid/left_wing/wrench</topic>
     </sensor>
-    <limit lower="-0.5236" upper="0.5236" effort="10" velocity="1.0"/>  <!-- ±30 degrees -->
+    <limit lower="-0.5236" upper="0.5236" effort="500.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
   </joint>
   
   <link name="right_wing">
     <inertial>
-      <origin xyz="-1.72531399 -1.11004875 0.18389363"  rpy="0 0 0"/>
+      <origin xyz="${right_wing_inertial}"  rpy="0 0 0"/>
       <mass value="3.662"/>
       <inertia ixx="0.55" ixy="-0.54" ixz="-0.022" iyy="0.662" iyz="-0.021" izz="1.202"/>
     </inertial>
@@ -324,7 +316,7 @@
     <child link="right_wing"/>
     <origin xyz="-1.225 -0.5 0.208" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <dynamics damping="2.5" friction="3000.0"/>  <!-- Increased friction for heavier wing -->
+    <dynamics damping="2.5" friction="10.0"/>  <!-- Lower friction; wing mass/inertia + aero carry the load -->
     <sensor name="right_wing_ft" type="force_torque">
       <update_rate>1</update_rate>
       <force_torque>
@@ -333,18 +325,18 @@
       </force_torque>
       <topic>/marid/right_wing/wrench</topic>
     </sensor>
-    <limit lower="-0.5236" upper="0.5236" effort="10" velocity="1.0"/>  <!-- ±30 degrees -->
+    <limit lower="-0.5236" upper="0.5236" effort="500.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
   </joint>
 
 
   <link name="tail_left">
     <inertial>
-      <origin xyz="-2.68157748 0.41201641 0.51410285" rpy="0 0 0"/>
+      <origin xyz="${tail_left_inertial}" rpy="0 0 1.57079632679"/>
       <mass value="0.1664684"/>
       <inertia ixx="0.00053436" ixy="0.0" ixz="-0.0003467078" iyy="0.000704515" iyz="0.0" izz="0.0006567504"/>
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="2.559906840 -0.28129418 -0.38425379" rpy="0 0 0"/>
       <geometry>
         <mesh filename="package://marid_description/meshes_2/tail_left.stl"/>
       </geometry>
@@ -353,7 +345,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="2.559906840 -0.28129418 -0.38425379" rpy="0 0 0"/>
       <geometry>
         <mesh filename="package://marid_description/meshes_2/tail_left.stl"/>
       </geometry>
@@ -363,9 +355,9 @@
   <joint name="tail_left_joint" type="revolute">
     <parent link="main_tail"/>
     <child link="tail_left"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-    <axis xyz="0.7071 0 -0.7071"/>
-    <dynamics damping="2.5" friction="3000.0"/>  <!-- Lock for aero at high speed; rotation only via actuation -->
+    <origin xyz="-2.559906840 0.28129418 0.38425379" rpy="0 0 0"/>
+    <axis xyz="0 0.7071 0.7071"/>
+    <dynamics damping="2.5" friction="10.0"/>  <!-- Lower friction; tail mass/inertia + aero carry the load -->
     <sensor name="left_tail_ft" type="force_torque">
       <update_rate>1</update_rate>
       <force_torque>
@@ -374,18 +366,18 @@
       </force_torque>
       <topic>/marid/left_tail/wrench</topic>
     </sensor>
-    <limit lower="-0.5236" upper="0.5236" effort="10" velocity="1.0"/>  <!-- ±30 degrees -->
+    <limit lower="-0.5236" upper="0.5236" effort="500.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
   </joint>
 
 
   <link name="tail_right">
     <inertial>
-      <origin xyz="-2.68157748 -0.41201641 0.51410285" rpy="0 0 0"/>
+      <origin xyz="${tail_right_inertial}" rpy="0 0 1.57079632679"/>
       <mass value="0.1664684"/>
       <inertia ixx="0.00053436" ixy="0.0" ixz="0.0003467078" iyy="0.000704515" iyz="0.0" izz="0.0006567504"/>
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="2.559906840 0.28129418 -0.38425379" rpy="0 0 0"/>
       <geometry>
         <mesh filename="package://marid_description/meshes_2/tail_right.stl"/>
       </geometry>
@@ -394,7 +386,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="2.559906840 0.28129418 -0.38425379" rpy="0 0 0"/>
       <geometry>
         <mesh filename="package://marid_description/meshes_2/tail_right.stl"/>
       </geometry>
@@ -404,9 +396,9 @@
   <joint name="tail_right_joint" type="revolute">
     <parent link="main_tail"/>
     <child link="tail_right"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-    <axis xyz="0.7071 0 0.7071"/>
-    <dynamics damping="2.5" friction="3000.0"/>  <!-- Lock for aero at high speed; rotation only via actuation -->
+    <origin xyz="-2.559906840 -0.28129418 0.38425379" rpy="0 0 0"/>
+    <axis xyz="0 0.7071 -0.7071"/>
+    <dynamics damping="2.5" friction="10.0"/>  <!-- Lower friction; tail mass/inertia + aero carry the load -->
     <sensor name="right_tail_ft" type="force_torque">
       <update_rate>1</update_rate>
       <force_torque>
@@ -415,7 +407,7 @@
       </force_torque>
       <topic>/marid/right_tail/wrench</topic>
     </sensor>
-    <limit lower="-0.5236" upper="0.5236" effort="10" velocity="1.0"/>  <!-- ±30 degrees -->
+    <limit lower="-0.5236" upper="0.5236" effort="500.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
   </joint>
 
 
@@ -529,7 +521,7 @@
 
   <link name="thruster_L">
     <inertial>
-      <origin xyz="-1.20 -0.3 0.50" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="0.05"/>
       <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
     </inertial>
@@ -545,7 +537,7 @@
 
   <link name="thruster_R">
     <inertial>
-      <origin xyz="-1.20 0.3 0.50" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="0.05"/>
       <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
     </inertial>

@@ -61,14 +61,14 @@
         <maxVel>0.2</maxVel>
     </gazebo>
 
-        <gazebo reference="rear_wheel">
-          <mu1>0.9</mu1>
-          <mu2>0.9</mu2>
-          <kp>2e5</kp>
-          <kd>2e3</kd>
-          <minDepth>0.001</minDepth>
-          <maxVel>0.2</maxVel>
-      </gazebo>
+    <gazebo reference="rear_wheel">
+        <mu1>0.9</mu1>
+        <mu2>0.9</mu2>
+        <kp>2e5</kp>
+        <kd>2e3</kd>
+        <minDepth>0.001</minDepth>
+        <maxVel>0.2</maxVel>
+    </gazebo>
 
     <!-- Aircraft-level aerodynamic model: AdvancedLiftDrag (single plugin) -->
     <gazebo>
@@ -111,7 +111,7 @@
             <Cema_stall>0</Cema_stall>
 
             <!-- Aerodynamic reference geometry (scaled for larger MARID airframe) -->
-            <cp>0 0 0</cp>          <!-- Aerodynamic center in base_link_front frame -->
+            <cp>-1.876 0 0.306</cp>          <!-- Aerodynamic center in base_link_front frame -->
             <area>2.0</area>        <!-- Reference area (m²) - scaled up for bigger drone -->
             <mac>0.35</mac>         <!-- Mean aerodynamic chord (m) - scaled for bigger drone -->
             <air_density>1.225</air_density>
@@ -130,7 +130,7 @@
             <control_surface>
                 <name>left_wing_joint</name>
                 <index>0</index>
-                <direction>1</direction>   <!-- Match right wing: both wings -1 to fix right-side lift bias -->
+                <direction>1</direction>   <!-- Same direction as right wing; differential deflection gives roll -->
                 <!-- Coefficients copied from reference servo_0 as a starting point -->
                 <CL_ctrl>2.2</CL_ctrl>
                 <CD_ctrl>0.06</CD_ctrl>
@@ -153,7 +153,7 @@
                 <Cen_ctrl>-0.01</Cen_ctrl>
             </control_surface>
 
-            <!-- Left tail surface (V-tail); direction matches reference servo_2 -->
+            <!-- Left tail surface (V-tail); tuned for MARID V-tail geometry -->
             <control_surface>
                 <name>tail_left_joint</name>
                 <index>2</index>
@@ -161,24 +161,24 @@
                 <CL_ctrl>0.4</CL_ctrl>
                 <CD_ctrl>0.02</CD_ctrl>
 
-                <Cem_ctrl>-0.25</Cem_ctrl>
+                <Cem_ctrl>0.25</Cem_ctrl>
                 <Cen_ctrl>0.10</Cen_ctrl>
 
                 <CY_ctrl>0.00</CY_ctrl>
                 <Cell_ctrl>0.00</Cell_ctrl>
             </control_surface>
 
-            <!-- Right tail surface (V-tail); direction matches reference servo_3 -->
+            <!-- Right tail surface (V-tail); tuned so symmetric deflection gives mostly pitch, differential gives yaw -->
             <control_surface>
                 <name>tail_right_joint</name>
                 <index>3</index>
-                <direction>-1</direction>
+                <direction>1</direction>
                               
                 <CL_ctrl>0.4</CL_ctrl>
                 <CD_ctrl>0.02</CD_ctrl>
 
-                <Cem_ctrl>-0.25</Cem_ctrl>
-                <Cen_ctrl>-0.10</Cen_ctrl>
+                <Cem_ctrl>0.25</Cem_ctrl>   <!-- With direction=1, Cem matches left tail so symmetric deflection adds pitch -->
+                <Cen_ctrl>-0.10</Cen_ctrl>  <!-- With direction=1, Cen opposes left tail so symmetric deflection cancels yaw -->
 
                 <CY_ctrl>0.00</CY_ctrl>
                 <Cell_ctrl>0.00</Cell_ctrl>
@@ -222,7 +222,7 @@
         </plugin>
     </gazebo>
 
-    <!-- ===== CENTER: Thruster plugin (force in N) - scaled for bigger drone, CCW rotation ===== -->
+    <!-- ===== CENTER: Thruster plugin (force in N) - scaled for bigger drone; rotation per thrust_coefficient sign (see comment) ===== -->
     <gazebo>
         <plugin filename="libgz-sim8-thruster-system.so" name="gz::sim::systems::Thruster">
             <joint_name>thruster_center_joint</joint_name>
@@ -277,13 +277,13 @@
     </gazebo>
 
     <!-- ===== JOINT POSITION CONTROLLERS FOR CONTROL SURFACES ===== -->
-    <!-- P-gain raised to overcome 150 N·m joint friction (wings/tails) for bigger drone -->
+    <!-- P-gain chosen so controllers can hold wings/tails stiff against aero and gravity with ~10 N·m joint friction -->
     <!-- Left Wing Position Controller -->
     <gazebo>
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>left_wing_joint</joint_name>
-            <p_gain>80.0</p_gain>
+            <p_gain>600.0</p_gain>
             <topic>/model/marid/joint/left_wing_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
@@ -293,7 +293,7 @@
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>right_wing_joint</joint_name>
-            <p_gain>80.0</p_gain>
+            <p_gain>600.0</p_gain>
             <topic>/model/marid/joint/right_wing_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
@@ -303,7 +303,7 @@
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>tail_left_joint</joint_name>
-            <p_gain>80.0</p_gain>
+            <p_gain>280.0</p_gain>
             <topic>/model/marid/joint/tail_left_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
@@ -313,7 +313,7 @@
         <plugin filename="libgz-sim8-joint-position-controller-system.so" 
                 name="gz::sim::systems::JointPositionController">
             <joint_name>tail_right_joint</joint_name>
-            <p_gain>80.0</p_gain>
+            <p_gain>280.0</p_gain>
             <topic>/model/marid/joint/tail_right_joint/cmd_pos</topic>
         </plugin>
     </gazebo>
