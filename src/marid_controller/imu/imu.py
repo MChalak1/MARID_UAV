@@ -37,8 +37,8 @@ class MaridImuController(Node):
         # ------------------ TARGETS (rad) ------------------
         self.target_roll  = 0.0
         self.target_pitch = 0.0
-        # REP-103: +X forward. To face +Y, set +pi/2
-        self.target_yaw   = math.pi/2
+        # REP-103: +X forward. For MARID X-forward, hover straight ahead at yaw=0.
+        self.target_yaw   = 0.0
 
         # ------------------ PID GAINS ------------------
         self.kp_roll,  self.ki_roll,  self.kd_roll  = 2.0, 0.0, 0.30

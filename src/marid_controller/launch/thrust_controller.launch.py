@@ -22,8 +22,8 @@ def generate_launch_description():
             parameters=[{
                 'initial_thrust': 0.0,         # Initial thrust: 0N (AI controller will set thrust)
                 'min_thrust': 0.0,             # Minimum thrust: 0N
-                'max_thrust': 30.0,            # Maximum thrust: 5000N
-                'thrust_increment': 1.0,       # Increment per keypress: 1N
+                'max_thrust': 5000.0,          # Maximum thrust: 5000N
+                'thrust_increment': 10.0,       # Increment per keypress: 1N
                 'world_name': 'wt',            # Gazebo world name
                 'model_name': 'marid',         # Model name
                 'link_name': 'base_link_front', # Link to apply force to

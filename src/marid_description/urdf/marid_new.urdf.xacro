@@ -116,17 +116,19 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0.525 -0.20786886 0.09000082" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <geometry>
-        <mesh filename="package://marid_description/meshes_2/front_left_tire.stl"/>
+        <cylinder radius="0.089" length="0.05"/>
       </geometry>
     </collision>
   </link>
 
-  <joint name="left_front_wheel_joint" type="fixed">
+  <joint name="left_front_wheel_joint" type="continuous">
     <parent link="left_front_wheel_arm"/>
     <child link="left_front_wheel"/>
     <origin xyz="-0.525 0.20786886 -0.09000082" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>  <!-- Wheel rotation around own axle (parallel to world Y) -->
+    <dynamics damping="0.01" friction="0.0"/>
   </joint>
 
   <link name="right_front_wheel">
@@ -145,17 +147,19 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0.525 0.20786886 0.09000082" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <geometry>
-        <mesh filename="package://marid_description/meshes_2/front_right_tire.stl"/>
+        <cylinder radius="0.089" length="0.05"/>
       </geometry>
     </collision>
   </link>
 
-  <joint name="right_front_wheel_joint" type="fixed">
+  <joint name="right_front_wheel_joint" type="continuous">
     <parent link="right_front_wheel_arm"/>
     <child link="right_front_wheel"/>
     <origin xyz="-0.525 -0.20786886 -0.09000082" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>  <!-- Wheel rotation around own axle (parallel to world Y) -->
+    <dynamics damping="0.01" friction="0.0"/>
   </joint>
 
   <link name="rear_wheel_arm">
@@ -203,17 +207,19 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="2.475 0 0.02500082" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <geometry>
-        <mesh filename="package://marid_description/meshes_2/rear_tire.stl"/>
+        <cylinder radius="0.08" length="0.05"/>
       </geometry>
     </collision>
   </link>
 
-  <joint name="rear_wheel_joint" type="fixed">
+  <joint name="rear_wheel_joint" type="continuous">
     <parent link="rear_wheel_arm"/>
     <child link="rear_wheel"/>
     <origin xyz="-2.475 0 -0.02500082" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>  <!-- Wheel rotation around own axle (parallel to world Y) -->
+    <dynamics damping="0.01" friction="0.0"/>
   </joint>
 
   <link name="main_tail">

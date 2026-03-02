@@ -94,7 +94,7 @@ def launch_setup(context):
                 'initial_thrust': initial_thrust,
                 'min_thrust': 0.0,
                 'thrust_to_weight_ratio': 0.65,  # Reduced from 2.5: gives max thrust ~1.3x weight (reasonable for aircraft)
-                'thrust_increment': 1.0,
+                'thrust_increment': 10.0,
                 'world_name': 'wt',
                 'model_name': 'marid',
                 'link_name': 'base_link_front',
@@ -134,14 +134,14 @@ def launch_setup(context):
                         'datum_longitude': datum_lon,
                         # Guidance parameters
                         'target_altitude': 5.0,  # m
-                        'target_velocity': 10.0,  # m/s
+                        'target_velocity': 70.0,  # m/s
                         'altitude_min': 3.0,  # m
                         'altitude_max': 10.0,  # m
                         'waypoint_tolerance': 2.0,  # m
                         # Guidance limits
                         'max_heading_rate': 0.5,  # rad/s
                         'min_speed': 10.0,  # m/s
-                        'max_speed': 50.0,  # m/s
+                        'max_speed': 100.0,  # m/s
                         'use_sim_time': True,
                     }]
                 )
@@ -162,12 +162,12 @@ def launch_setup(context):
                     parameters=[{
                         'update_rate': 50.0,
                         # Thrust parameters
-                        'base_thrust_override': initial_thrust, # Fixed thrust (overrides PID calculations)
+                        'base_thrust_override': -1.0, # Fixed thrust (overrides PID calculations)
                         'thrust_to_weight_ratio': 0.65,  # Not used when override is set
                         'min_thrust': 0.0,
                         'max_yaw_differential': 0.2,
                         # Physics-based thrust (disabled for fixed thrust test)
-                        'use_physics_thrust': False,
+                        'use_physics_thrust': True,
                         'use_airspeed_sensor': True,
                         'drag_coefficient': 0.1,  # Tune based on your model
                         'air_density': 1.225,  # kg/m³ at sea level

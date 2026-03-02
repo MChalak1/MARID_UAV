@@ -68,7 +68,7 @@ class MaridThrustController(Node):
         # Parameters
         self.declare_parameter('initial_thrust', 1.0)        # Initial thrust in Newtons
         self.declare_parameter('min_thrust', 0.0)             # Minimum thrust (N)
-        self.declare_parameter('max_thrust', 200.0)          # Maximum thrust (N) - can be None for auto-calculation
+        self.declare_parameter('max_thrust', 5000.0)          # Maximum thrust (N) - can be None for auto-calculation
         self.declare_parameter('thrust_to_weight_ratio', 2.5)  # Thrust-to-weight ratio (if max_thrust is None)
         self.declare_parameter('base_thrust_override', -1.0)  # Override auto-calculation if set (N), -1.0 means not set
         self.declare_parameter('thrust_increment', 1.0)       # Thrust increment per keypress (N)
@@ -81,8 +81,8 @@ class MaridThrustController(Node):
         self.declare_parameter('thrust_to_angvel_gain', 50.0)  # Conversion factor: omega = gain * sqrt(thrust)
         self.declare_parameter('use_thruster_plugin', True)    # Use Gazebo Thruster plugin (True) or legacy wrench (False)
         self.declare_parameter('use_center_thruster', False)   # Use single center thruster (True) or dual left/right (False)
-        self.declare_parameter('thrust_rate_limit', 50.0)       # Max change rate (N/s) for smooth transitions
-        self.declare_parameter('thrust_smoothing_factor', 0.1)  # Exponential smoothing: 0.0 = no smoothing, 1.0 = full smoothing
+        self.declare_parameter('thrust_rate_limit', 450.0)       # Max change rate (N/s) for smooth transitions
+        self.declare_parameter('thrust_smoothing_factor', 0.45)  # Exponential smoothing: 0.0 = no smoothing, 1.0 = full smoothing
         
         self.initial_thrust_ = self.get_parameter('initial_thrust').value
         self.min_thrust_ = self.get_parameter('min_thrust').value
@@ -496,7 +496,7 @@ class MaridThrustController(Node):
             self.last_published_center_ = center_thrust
             
             if self.use_thruster_plugin_:
-                # Thruster plugin: publish force in N (axis 0 1 0 = force +Y forward)
+                # Thruster plugin: publish force in N; thrust direction is set by joint axis in URDF (X-forward for marid_new)
                 msg = Float64()
                 msg.data = float(max(0.0, max(self.min_thrust_, min(self.max_thrust_, center_thrust))))
                 self.thrust_center_pub_.publish(msg)

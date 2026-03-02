@@ -31,7 +31,7 @@ def generate_launch_description():
                 'altitude_min': 3.0,  # Minimum altitude (m)
                 'altitude_max': 10.0,  # Maximum altitude (m)
                 'target_altitude': 5.0,  # Preferred altitude (m)
-                'target_velocity': 10.0,  # Average speed (m/s)
+                'target_velocity': 50.0,  # Average speed (m/s)
                 'waypoint_tolerance': 2.0,  # Waypoint reach tolerance (m)
                 'altitude_tolerance': 1.0,  # Altitude tolerance (m)
                 # Control limits - AUTO-CALCULATION MODE

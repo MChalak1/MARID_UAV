@@ -223,7 +223,7 @@ class MaridGuidanceTracker(Node):
                 else:
                     g = 9.81
                     weight = aircraft_mass * g
-                    self.max_thrust_ = weight * self.thrust_to_weight_ratio_
+                    self.max_thrust_ = 10 * weight * self.thrust_to_weight_ratio_
                 self.get_logger().info(f'Aircraft mass: {aircraft_mass:.2f} kg, max_thrust: {self.max_thrust_:.2f} N')
             else:
                 self.aircraft_mass_ = 10.0  # Default fallback
@@ -362,7 +362,7 @@ class MaridGuidanceTracker(Node):
             import os
             
             package_dir = get_package_share_directory('marid_description')
-            urdf_path = os.path.join(package_dir, 'urdf', 'marid.urdf')
+            urdf_path = os.path.join(package_dir, 'urdf', 'marid_new.urdf.xacro')
             
             # Try to run xacro to get URDF string
             import subprocess

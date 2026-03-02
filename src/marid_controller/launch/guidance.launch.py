@@ -33,13 +33,13 @@ def generate_launch_description():
                         'datum_latitude': datum_lat,
                         'datum_longitude': datum_lon,
                         'target_altitude': 5.0,
-                        'target_velocity': 10.0,
+                        'target_velocity': 40.0,
                         'altitude_min': 3.0,
                         'altitude_max': 10.0,
                         'waypoint_tolerance': 2.0,
                         'max_heading_rate': 0.5,
                         'min_speed': 10.0,
-                        'max_speed': 50.0,
+                        'max_speed': 100.0,
                         'use_sim_time': True,
                     }]
                 )

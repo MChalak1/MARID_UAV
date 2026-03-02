@@ -261,27 +261,26 @@ class MaridAttitudeController(Node):
         return np.array([x, y])
     
     def odom_callback(self, msg):
-        """Extract attitude from odometry"""
+        """Extract attitude from odometry (standard X-forward convention)"""
         self.current_odom_ = msg
         
         # Extract roll, pitch, yaw from quaternion
+        # Gazebo / ROS use REP-103: +X forward, +Y left, +Z up, with
+        # roll about X, pitch about Y, yaw about Z.
         q = msg.pose.pose.orientation
         roll, pitch, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
         
-        # SWAP ROLL AND PITCH: Drone faces Y-axis (not X), so:
-        # - Gazebo's "pitch" (Y-axis rotation) = drone's "roll" (rotation around forward axis)
-        # - Gazebo's "roll" (X-axis rotation) = drone's "pitch" (rotation around lateral axis)
-        self.current_roll_ = pitch   # What Gazebo calls "pitch" is actually "roll" for Y-forward
-        self.current_pitch_ = roll    # What Gazebo calls "roll" is actually "pitch" for Y-forward
+        # For X-forward MARID, use roll, pitch, yaw directly.
+        self.current_roll_ = roll
+        self.current_pitch_ = pitch
         self.current_yaw_ = yaw
     
     def imu_callback(self, msg):
-        """Extract angular rates from IMU"""
+        """Extract angular rates from IMU (standard X-forward convention)"""
         self.current_imu_ = msg
-        # SWAP ROLL_RATE AND PITCH_RATE: Match the swapped roll/pitch orientation
-        # For Y-forward: Y angular velocity = roll rate, X angular velocity = pitch rate
-        self.current_roll_rate_ = msg.angular_velocity.y   # Y angular velocity = roll rate for Y-forward
-        self.current_pitch_rate_ = msg.angular_velocity.x   # X angular velocity = pitch rate for Y-forward
+        # Angular velocity is reported in the body frame about X, Y, Z.
+        self.current_roll_rate_ = msg.angular_velocity.x
+        self.current_pitch_rate_ = msg.angular_velocity.y
         self.current_yaw_rate_ = msg.angular_velocity.z
     
     def waypoint_callback(self, msg):

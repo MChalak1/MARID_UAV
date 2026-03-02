@@ -1,0 +1,182 @@
+wheels:
+
+  <!--Landing Gears-->
+  <link name="left_front_wheel_arm">
+    <inertial>
+      <mass value="0.392"/>
+      <origin xyz="-0.525 0.20786886 -0.00022077" rpy="0 0 0"/>
+      <inertia ixx="0.002" ixy="0.0" ixz="0.0" iyy="0.002" iyz="0.0" izz="3.794e-4"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/front_left_arm.stl"/>
+      </geometry>
+      <material name="arm_black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/front_left_arm.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="left_arm_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="left_front_wheel_arm"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>  <!-- Top of left arm from CAD (min dist), m; Z neg = below origin -->
+  </joint>
+
+  <link name="right_front_wheel_arm">
+    <inertial>
+      <mass value="0.392"/>
+      <origin xyz="-0.525 -0.20786886 -0.00022077" rpy="0 0 0"/>
+      <inertia ixx="0.002" ixy="0.0" ixz="0.0" iyy="0.002" iyz="0.0" izz="3.794e-4"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/front_right_arm.stl"/>
+      </geometry>
+      <material name="arm_black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/front_right_arm.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="right_arm_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="right_front_wheel_arm"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>  <!-- Top of right arm from CAD (min dist), m; Z neg = below origin -->
+  </joint>
+
+  <link name="left_front_wheel">
+    <inertial>
+      <mass value="0.934"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0036" ixy="0" ixz="0" iyy="0.007" iyz="0" izz="0.0036"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.525 -0.20786886 0.09000082" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/front_left_tire.stl"/>
+      </geometry>
+      <material name="tire_black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.525 -0.20786886 0.09000082" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/front_left_tire.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="left_front_wheel_joint" type="fixed">
+    <parent link="left_front_wheel_arm"/>
+    <child link="left_front_wheel"/>
+    <origin xyz="-0.525 0.20786886 -0.09000082" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>  <!-- Wheel rotation around own axle (parallel to world Y) -->
+    <dynamics damping="0.01" friction="0.0"/>
+  </joint>
+
+  <link name="right_front_wheel">
+    <inertial>
+      <mass value="0.934"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0036" ixy="0" ixz="0" iyy="0.007" iyz="0" izz="0.0036"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.525 0.20786886 0.09000082" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/front_right_tire.stl"/>
+      </geometry>
+      <material name="tire_black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.525 0.20786886 0.09000082" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/front_right_tire.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="right_front_wheel_joint" type="fixed">
+    <parent link="right_front_wheel_arm"/>
+    <child link="right_front_wheel"/>
+    <origin xyz="-0.525 -0.20786886 -0.09000082" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>  <!-- Wheel rotation around own axle (parallel to world Y) -->
+    <dynamics damping="0.01" friction="0.0"/>
+  </joint>
+
+  <link name="rear_wheel_arm">
+    <inertial>
+      <mass value="0.362"/>
+      <origin xyz="-2.47499035 0 0.05355912" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="-3.417e-7" iyy="0.001" iyz="0.0" izz="3.242e-4"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/rear_arm.stl"/>
+      </geometry>
+      <material name="arm_black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/rear_arm.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="rear_arm_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="rear_wheel_arm"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>  <!-- Rear arm -->
+  </joint>
+
+  <link name="rear_wheel">
+    <inertial>
+      <mass value="0.573"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0016" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.0016"/>
+    </inertial>
+    <visual>
+      <origin xyz="2.475 0 0.02500082" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/rear_tire.stl"/>
+      </geometry>
+      <material name="tire_black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="2.475 0 0.02500082" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://marid_description/meshes_2/rear_tire.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="rear_wheel_joint" type="fixed">
+    <parent link="rear_wheel_arm"/>
+    <child link="rear_wheel"/>
+    <origin xyz="-2.475 0 -0.02500082" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>  <!-- Wheel rotation around own axle (parallel to world Y) -->
+    <dynamics damping="0.01" friction="0.0"/>
+  </joint>

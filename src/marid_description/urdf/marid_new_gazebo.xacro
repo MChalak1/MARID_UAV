@@ -130,27 +130,27 @@
             <control_surface>
                 <name>left_wing_joint</name>
                 <index>0</index>
-                <direction>1</direction>   <!-- Same direction as right wing; differential deflection gives roll -->
+                <direction>-1</direction>   <!-- Same direction as right wing; differential deflection gives roll -->
                 <!-- Coefficients copied from reference servo_0 as a starting point -->
                 <CL_ctrl>2.2</CL_ctrl>
-                <CD_ctrl>0.06</CD_ctrl>
-                <Cem_ctrl>-0.35</Cem_ctrl>
-                <Cell_ctrl>-0.05</Cell_ctrl>
+                <CD_ctrl>0.08</CD_ctrl>
+                <Cem_ctrl>0.45</Cem_ctrl>
+                <Cell_ctrl>0.05</Cell_ctrl>
                 <CY_ctrl>0.00</CY_ctrl>
-                <Cen_ctrl>0.01</Cen_ctrl>
+                <Cen_ctrl>-0.01</Cen_ctrl>
             </control_surface>
 
             <!-- Right wing; direction matches reference servo_1 -->
             <control_surface>
                 <name>right_wing_joint</name>
                 <index>1</index>
-                <direction>1</direction>
+                <direction>-1</direction>
                 <CL_ctrl>2.2</CL_ctrl>
-                <CD_ctrl>0.06</CD_ctrl>
-                <Cem_ctrl>-0.35</Cem_ctrl>
-                <Cell_ctrl>0.05</Cell_ctrl>
+                <CD_ctrl>0.08</CD_ctrl>
+                <Cem_ctrl>0.45</Cem_ctrl>
+                <Cell_ctrl>-0.05</Cell_ctrl>
                 <CY_ctrl>0.00</CY_ctrl>
-                <Cen_ctrl>-0.01</Cen_ctrl>
+                <Cen_ctrl>0.01</Cen_ctrl>
             </control_surface>
 
             <!-- Left tail surface (V-tail); tuned for MARID V-tail geometry -->
@@ -162,7 +162,7 @@
                 <CD_ctrl>0.02</CD_ctrl>
 
                 <Cem_ctrl>0.25</Cem_ctrl>
-                <Cen_ctrl>0.10</Cen_ctrl>
+                <Cen_ctrl>-0.05</Cen_ctrl>
 
                 <CY_ctrl>0.00</CY_ctrl>
                 <Cell_ctrl>0.00</Cell_ctrl>
@@ -178,7 +178,7 @@
                 <CD_ctrl>0.02</CD_ctrl>
 
                 <Cem_ctrl>0.25</Cem_ctrl>   <!-- With direction=1, Cem matches left tail so symmetric deflection adds pitch -->
-                <Cen_ctrl>-0.10</Cen_ctrl>  <!-- With direction=1, Cen opposes left tail so symmetric deflection cancels yaw -->
+                <Cen_ctrl>0.05</Cen_ctrl>  <!-- With direction=1, Cen opposes left tail so symmetric deflection cancels yaw -->
 
                 <CY_ctrl>0.00</CY_ctrl>
                 <Cell_ctrl>0.00</Cell_ctrl>
