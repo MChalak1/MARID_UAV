@@ -1,0 +1,38 @@
+joy_teleop:
+  ros__parameters:
+    move:
+      type: topic
+      interface_type: geometry_msgs/msg/Twist
+      topic_name: /cmd_vel
+
+      deadman_buttons: [5]
+
+      axis_mappings:
+        linear-x:
+          axis: 1
+          scale: 2.0
+          offset: 0.0
+
+        angular-z:
+          axis: 4
+          scale: -2.0
+          offset: 0.0
+
+        # Left stick horizontal -> front differential (roll)
+        linear-y:
+          axis: 0
+          scale: 2.0
+          offset: 0.0
+
+        # Right stick horizontal -> tail differential (yaw)
+        angular-y:
+          axis: 3
+          scale: 2.0
+          offset: 0.0
+
+        # Right trigger -> center thrust (mapped into linear.z)
+        linear-z:
+          axis: 5
+          scale: -4.0
+          offset: 0.0
+

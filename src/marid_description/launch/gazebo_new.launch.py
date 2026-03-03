@@ -127,6 +127,16 @@ def generate_launch_description():
         ])
     )
 
+    controller_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory("marid_controller"),
+                "launch",
+                "controller.launch.py"
+            )
+        ])
+    )
+
     return LaunchDescription([
         model_arg,
         world_arg,
@@ -136,4 +146,5 @@ def generate_launch_description():
         gz_spawn_entity,
         imu_bridge,
         localization_launch,
+        controller_launch,
     ])
