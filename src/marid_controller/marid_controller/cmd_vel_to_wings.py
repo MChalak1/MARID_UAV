@@ -15,7 +15,7 @@ class CmdVelToWings(Node):
         self.declare_parameter("tail_gain", 1.0)
         self.declare_parameter("roll_gain", 0.5)
         self.declare_parameter("yaw_gain", 0.5)
-        self.declare_parameter("thrust_gain", 900.0)
+        self.declare_parameter("thrust_gain", 250.0)
 
         self.front_gain = float(self.get_parameter("front_gain").value)
         self.tail_gain = float(self.get_parameter("tail_gain").value)

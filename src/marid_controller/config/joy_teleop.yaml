@@ -33,6 +33,6 @@ joy_teleop:
         # Right trigger -> center thrust (mapped into linear.z)
         linear-z:
           axis: 5
-          scale: -4.0
+          scale: -10.0
           offset: 0.0
 

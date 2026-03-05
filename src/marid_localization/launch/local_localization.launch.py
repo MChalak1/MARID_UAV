@@ -30,7 +30,7 @@ def generate_launch_description():
         Node(
             package="tf2_ros",
             executable="static_transform_publisher",
-            arguments=["--x", "0", "--y", "0","--z", "0.103",
+            arguments=["--x", "0", "--y", "0","--z", "0.2",
                     "--qx", "0", "--qy", "0", "--qz", "0", "--qw", "1",
                     "--frame-id", "base_link_front",
                     "--child-frame-id", "imu_link_ekf"],
@@ -42,7 +42,7 @@ def generate_launch_description():
         Node(
             package="tf2_ros",
             executable="static_transform_publisher",
-            arguments=["--x", "0", "--y", "0", "--z", "0.02",
+            arguments=["--x", "0", "--y", "0", "--z", "0.2",
                        "--qx", "0", "--qy", "0", "--qz", "0", "--qw", "1",
                        "--frame-id", "base_link_front",
                        "--child-frame-id", "camera_init"],

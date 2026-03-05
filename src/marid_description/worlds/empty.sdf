@@ -10,6 +10,9 @@
     <plugin name='gz::sim::systems::UserCommands' filename='gz-sim-user-commands-system'/>
     <plugin name='gz::sim::systems::SceneBroadcaster' filename='gz-sim-scene-broadcaster-system'/>
     <plugin name='gz::sim::systems::Contact' filename='gz-sim-contact-system'/>
+    <plugin name='gz::sim::systems::Sensors' filename='gz-sim-sensors-system'>
+      <render_engine>ogre2</render_engine>
+    </plugin>
     <gravity>0 0 -9.81</gravity>
 
     <spherical_coordinates>
@@ -20,6 +23,67 @@
       <elevation>5</elevation>
       <heading_deg>0</heading_deg>
     </spherical_coordinates>
+
+    <gui fullscreen='false'>
+      <plugin name='3D View' filename='GzScene3D'>
+        <ignition-gui>
+          <title>3D View</title>
+          <property type='bool' key='showTitleBar'>false</property>
+          <property type='string' key='state'>docked</property>
+        </ignition-gui>
+        <engine>ogre2</engine>
+        <scene>scene</scene>
+      </plugin>
+
+      <plugin name='Camera View' filename='ImageDisplay'>
+        <ignition-gui>
+          <property type='string' key='state'>docked</property>
+          <property type='double' key='width'>340</property>
+          <anchors target='3D View'>
+            <line own='left' target='right'/>
+            <line own='top' target='top'/>
+          </anchors>
+        </ignition-gui>
+        <topic>/camera/image_raw</topic>
+      </plugin>
+
+      <plugin name='Entity Tree' filename='EntityTree'>
+        <ignition-gui>
+          <property type='string' key='state'>docked</property>
+          <property type='double' key='width'>340</property>
+          <anchors target='Camera View'>
+            <line own='left' target='left'/>
+            <line own='right' target='right'/>
+            <line own='top' target='bottom'/>
+          </anchors>
+        </ignition-gui>
+      </plugin>
+
+      <plugin name='Component Inspector' filename='ComponentInspector'>
+        <ignition-gui>
+          <property type='string' key='state'>docked</property>
+          <property type='double' key='width'>340</property>
+          <anchors target='Entity Tree'>
+            <line own='left' target='left'/>
+            <line own='right' target='right'/>
+            <line own='top' target='bottom'/>
+            <line own='bottom' target='bottom'/>
+          </anchors>
+        </ignition-gui>
+      </plugin>
+
+      <plugin name='World control' filename='WorldControl'>
+        <play_pause>true</play_pause>
+        <step>true</step>
+      </plugin>
+
+      <plugin name='World stats' filename='WorldStats'>
+        <sim_time>true</sim_time>
+        <real_time>true</real_time>
+        <real_time_factor>true</real_time_factor>
+        <iterations>true</iterations>
+      </plugin>
+    </gui>
     
     <magnetic_field>5.5644999999999998e-06 2.2875799999999999e-05 -4.2388400000000002e-05</magnetic_field>
     <atmosphere type='adiabatic'/>
