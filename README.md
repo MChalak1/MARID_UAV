@@ -10,6 +10,14 @@ Core simulation and control functionality is implemented and tested. Several sub
 
 ---
 
+### Current status
+
+Simulation with camera HUD overlay (roll/pitch/yaw + altitude) in Gazebo and LiDAR point cloud in RViz:
+
+![Camera HUD overlay in Gazebo](docs/images/hud_gazebo.png)
+
+---
+
 ## ✈️ Features
 
 ### Core Simulation

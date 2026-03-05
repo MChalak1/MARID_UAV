@@ -150,6 +150,19 @@ def generate_launch_description():
             parameters=[{'use_sim_time': True}],
             remappings=[('/imu', '/imu/data')],
         ),
+        # Camera HUD overlay: draws filtered IMU attitude over camera feed
+        Node(
+            package='marid_localization',
+            executable='camera_hud_overlay.py',
+            name='camera_hud_overlay',
+            output='screen',
+            parameters=[{
+                'image_topic': '/camera/image_raw',
+                'imu_topic': '/imu_ekf',
+                'output_topic': '/camera/image_hud',
+                'smoothing_alpha': 0.15,
+            }],
+        ),
         # IMU-based odometry (publishes /marid/odom for EKF when FAST-LIO/Gazebo pose unavailable)
         Node(
             package='marid_controller',
