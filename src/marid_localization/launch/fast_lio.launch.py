@@ -22,6 +22,20 @@ def generate_launch_description():
             default_value=config_file,
             description='Path to FAST-LIO config file'
         ),
+        # Inject per-point 'time' field that Gazebo gpu_lidar omits but FAST-LIO requires.
+        # Subscribes to raw /lidar/scan/points and republishes with zero-valued time on
+        # /lidar/scan/points_timed (motion compensation is unaffected; sim scans are instantaneous).
+        Node(
+            package='marid_localization',
+            executable='lidar_time_field.py',
+            name='lidar_time_field',
+            output='screen',
+            parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+            remappings=[
+                ('input',  '/lidar/scan/points'),
+                ('output', '/lidar/scan/points_timed'),
+            ],
+        ),
         TimerAction(
             period=2.0,
             actions=[

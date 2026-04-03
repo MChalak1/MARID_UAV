@@ -107,6 +107,7 @@ def generate_launch_description():
         "/model/marid/joint/right_wing_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
         "/model/marid/joint/tail_left_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
         "/model/marid/joint/tail_right_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
+        "/airspeed@ros_gz_interfaces/msg/AirSpeed[gz.msgs.AirSpeed",
         "/lidar/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
         # Camera bridge (ROS <-> Gazebo):
         "/camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image",

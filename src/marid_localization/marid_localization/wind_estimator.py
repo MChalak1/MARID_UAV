@@ -73,31 +73,26 @@ class WindEstimator(Node):
             return
 
         try:
-            # Ground velocity in odom frame
-            vx = msg.twist.twist.linear.x
-            vy = msg.twist.twist.linear.y
-            vz = msg.twist.twist.linear.z
-            v_ground_odom = np.array([vx, vy, vz], dtype=float)
-
-            # Orientation (odom -> body) from odometry
+            # Orientation: quaternion describes rotation from body to odom
             qx = msg.pose.pose.orientation.x
             qy = msg.pose.pose.orientation.y
             qz = msg.pose.pose.orientation.z
             qw = msg.pose.pose.orientation.w
 
-            # Rotation matrix from quaternion (odom -> body)
-            T_odom_body = quaternion_matrix([qx, qy, qz, qw])  # 4x4
-            R_odom_body = T_odom_body[:3, :3]
+            # R_body_odom rotates vectors from body frame into odom frame
+            T = quaternion_matrix([qx, qy, qz, qw])
+            R_body_odom = T[:3, :3]
 
-            # We need rotation body->odom to express body-frame vectors in odom frame:
-            R_body_odom = R_odom_body.T
+            # twist.twist.linear is in the child (body) frame — rotate to odom frame
+            v_ground_body = np.array(
+                [msg.twist.twist.linear.x,
+                 msg.twist.twist.linear.y,
+                 msg.twist.twist.linear.z], dtype=float)
+            v_ground_odom = R_body_odom @ v_ground_body
 
-            # Airspeed vector in body frame: along +X_body
+            # Airspeed vector in body frame: along +X_body, rotated to odom frame
             airspeed = float(self.last_airspeed_)
-            v_air_body = np.array([airspeed, 0.0, 0.0], dtype=float)
-
-            # Airspeed in odom frame
-            v_air_odom = R_body_odom @ v_air_body
+            v_air_odom = R_body_odom @ np.array([airspeed, 0.0, 0.0], dtype=float)
 
             # Wind vector in odom frame: v_wind = v_ground - v_air
             v_wind_odom = v_ground_odom - v_air_odom

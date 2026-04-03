@@ -148,7 +148,7 @@ class CameraHudOverlay(Node):
 
         cx = w // 2
         cy = h // 2
-        horizon_half_width = min(140, w // 4)
+        horizon_half_width = min(320, w // 2)
         pitch_pixels_per_deg = 3.0
         y_horizon = int(cy - self.pitch_deg_ * pitch_pixels_per_deg) if self.have_attitude_ else cy
         roll_rad = math.radians(self.roll_deg_) if self.have_attitude_ else 0.0
@@ -158,9 +158,36 @@ class CameraHudOverlay(Node):
         p1 = (cx - dx, y_horizon + dy)
         p2 = (cx + dx, y_horizon - dy)
 
-        # Horizon line: dark outline then bright line for visibility
-        cv2.line(frame, p1, p2, (0, 0, 0), 6, cv2.LINE_AA)
-        cv2.line(frame, p1, p2, (255, 255, 255), 4, cv2.LINE_AA)
+        # Horizon line: dark outline then bold red line
+        cv2.line(frame, p1, p2, (0, 0, 0), 10, cv2.LINE_AA)
+        cv2.line(frame, p1, p2, (255, 0, 0), 6, cv2.LINE_AA)
+
+        # Pitch bars: short vertical bars left/right of center, aligned with roll
+        vx = float(p2[0] - p1[0])
+        vy = float(p2[1] - p1[1])
+        norm_v = math.hypot(vx, vy)
+        if norm_v > 1e-3:
+            ux = vx / norm_v
+            uy = vy / norm_v
+            # Normal vector (perpendicular to horizon)
+            nx = -uy
+            ny = ux
+
+            bar_offset = min(120.0, horizon_half_width * 0.75)
+            bar_length = 70.0
+
+            # Base points along the horizon (left and right of center)
+            left_base = (cx - ux * bar_offset, y_horizon - uy * bar_offset)
+            right_base = (cx + ux * bar_offset, y_horizon + uy * bar_offset)
+
+            # Endpoints of bars (extend equally above/below horizon)
+            half_len = bar_length * 0.5
+            for base in (left_base, right_base):
+                bx, by = base
+                top = (int(bx - nx * half_len), int(by - ny * half_len))
+                bottom = (int(bx + nx * half_len), int(by + ny * half_len))
+                cv2.line(frame, top, bottom, (0, 255, 0), 4, cv2.LINE_AA)
+
         cv2.drawMarker(frame, (cx, cy), (0, 0, 0), cv2.MARKER_CROSS, 24, 4)
         cv2.drawMarker(frame, (cx, cy), (255, 255, 255), cv2.MARKER_CROSS, 20, 2)
 

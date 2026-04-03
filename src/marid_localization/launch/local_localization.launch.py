@@ -30,21 +30,24 @@ def generate_launch_description():
         Node(
             package="tf2_ros",
             executable="static_transform_publisher",
+            name="imu_link_ekf_broadcaster",
             arguments=["--x", "0", "--y", "0","--z", "0.2",
                     "--qx", "0", "--qy", "0", "--qz", "0", "--qw", "1",
                     "--frame-id", "base_link_front",
                     "--child-frame-id", "imu_link_ekf"],
         ),
-        
-        # Align FAST-LIO's camera_init frame with odom (Gazebo world) for EKF fusion.
-        # camera_init origin = first LiDAR scan = robot spawn at (0, 0, 0.8) in Gazebo.
-        # Enables robot_localization to correctly fuse /Odometry (LiDAR) with /gazebo/odom.
+
+        # Align FAST-LIO's camera_init world frame with odom at startup.
+        # camera_init is FAST-LIO's inertial reference frame (set at first LiDAR scan).
+        # It must be a child of odom (not base_link_front) so robot_localization can
+        # transform /Odometry into the odom frame for EKF fusion.
         Node(
             package="tf2_ros",
             executable="static_transform_publisher",
+            name="camera_init_broadcaster",
             arguments=["--x", "0", "--y", "0", "--z", "0.2",
                        "--qx", "0", "--qy", "0", "--qz", "0", "--qw", "1",
-                       "--frame-id", "base_link_front",
+                       "--frame-id", "odom",
                        "--child-frame-id", "camera_init"],
         ),
         # FAST-LIO LiDAR-inertial odometry (optional; publishes /Odometry for local EKF)
@@ -178,9 +181,8 @@ def generate_launch_description():
             name='airspeed_converter',
             output='screen',
             parameters=[{
-                'gz_topic': '/airspeed',
-                'output_topic': '/airspeed/velocity',  # Changed to avoid conflict with FluidPressure publisher
-                'publish_rate': 50.0,
+                'input_topic': '/airspeed',
+                'output_topic': '/airspeed/velocity',
             }]
         ),
         

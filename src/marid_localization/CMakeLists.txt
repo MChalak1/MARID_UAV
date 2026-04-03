@@ -30,6 +30,7 @@ install(PROGRAMS
   marid_localization/air_density_calculator.py
   marid_localization/airspeed_converter.py
   marid_localization/wind_estimator.py
+  marid_localization/lidar_time_field.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -291,7 +291,7 @@
       </force_torque>
       <topic>/marid/left_wing/wrench</topic>
     </sensor>
-    <limit lower="-0.075" upper="0.075" effort="700.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
+    <limit lower="-0.15" upper="0.15" effort="700.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
   </joint>
   
   <link name="right_wing">
@@ -331,7 +331,7 @@
       </force_torque>
       <topic>/marid/right_wing/wrench</topic>
     </sensor>
-    <limit lower="-0.075" upper="0.075" effort="700.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
+    <limit lower="-0.15" upper="0.15" effort="700.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
   </joint>
 
 
@@ -372,7 +372,7 @@
       </force_torque>
       <topic>/marid/left_tail/wrench</topic>
     </sensor>
-    <limit lower="-0.1" upper="0.1" effort="500.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
+    <limit lower="-0.25" upper="0.25" effort="500.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
   </joint>
 
 
@@ -413,7 +413,7 @@
       </force_torque>
       <topic>/marid/right_tail/wrench</topic>
     </sensor>
-    <limit lower="-0.1" upper="0.1" effort="500.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
+    <limit lower="-0.25" upper="0.25" effort="500.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
   </joint>
 
 
@@ -493,7 +493,7 @@
   <joint name="lidar_joint" type="fixed">
     <parent link="base_link_front"/>
     <child link="lidar_link"/>
-    <origin xyz="0 0.2 0.05" rpy="0 0 0"/>  <!-- LIDAR offset from base (Y right, Z up) -->
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>  <!-- LIDAR offset from base (Y right, Z up) -->
   </joint>
 
   <link name="pitot_link">
@@ -611,7 +611,7 @@
       <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
     </inertial>
     <visual>
-      <origin xyz="-1 0 1" rpy="0 0 0"/>
+      <origin xyz="-0.025 0 .25" rpy="0 0 0"/>
       <geometry>
         <box size="0.02 0.06 0.02"/>
       </geometry>
@@ -632,7 +632,7 @@
     <child link="camera_link"/>
     <!-- Nose mount, forward-looking -->
     <!-- Rotate camera 15 degrees around Y axis (pitch up, CCW in URDF rpy) -->
-    <origin xyz="0 0 0" rpy="0 0.261799 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
 
