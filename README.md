@@ -1,6 +1,6 @@
 # MARID UAV
 
-**Modular Aerospace Robotics & Integrated Design (MARID)** is a research-oriented UAV framework developed in **ROS 2** and **Gazebo**.  
+**Multi-Axis Rotary-Wing Integrated Design (MARID) UAV** is a research-oriented UAV framework developed in **ROS 2** and **Gazebo**.  
 The project focuses on **modular aircraft architectures**, **physics-based simulation**, and **AI-assisted autonomous guidance** integrated with classical flight-control systems.
 
 ⚠️ **Status: Active Research & Development**  
