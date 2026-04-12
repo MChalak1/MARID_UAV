@@ -4,10 +4,12 @@
 
 imu_filter_madgwick:
   ros__parameters:
-    # No magnetometer - use only gyro and accelerometer
-    use_mag: false
-    # World frame: enu (Z up, X East, Y North) to match odom/Gazebo
+    use_mag: true
     world_frame: "enu"
+    # Madgwick ENU sets yaw=0 = direction of horizontal magnetic field.
+    # At SF Bay (lat=37.4) the field is [5.56e-6, 2.29e-5] T in ENU → 76.3° from East.
+    # Shift output by atan2(mag_y, mag_x) = 1.3322 rad so yaw=0 = body X pointing East.
+    declination: 1.3322
     # EKF publishes TF; filter does not
     publish_tf: false
     fixed_frame: "odom"

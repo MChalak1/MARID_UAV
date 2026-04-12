@@ -635,6 +635,46 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
+  <!-- Optical Flow Camera - belly mount, downward facing -->
+  <link name="optical_flow_link">
+    <inertial>
+      <mass value="0.01"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.02 0.02 0.01"/></geometry>
+      <material name="of_gray"><color rgba="0.5 0.5 0.5 1.0"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.02 0.02 0.01"/></geometry>
+    </collision>
+  </link>
+
+  <!-- rpy="0 1.5708 0": pitch +90° rotates sensor +X to body -Z (downward) -->
+  <joint name="optical_flow_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="optical_flow_link"/>
+    <origin xyz="-0.5 0 0.1" rpy="0 1.5708 0"/>
+  </joint>
+
+  <!-- Sonar Rangefinder - belly mount, downward facing -->
+  <link name="sonar_link">
+    <inertial>
+      <mass value="0.005"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="1e-7" iyy="1e-7" izz="1e-7" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <joint name="sonar_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="sonar_link"/>
+    <origin xyz="-0.5 0 0.1" rpy="0 1.5708 0"/>
+  </joint>
+
 
     <!-- Nose propeller (MulticopterMotorModel: command motor speed rad/s on command/motor_speed_nose) -->
   <link name="nose_prop">

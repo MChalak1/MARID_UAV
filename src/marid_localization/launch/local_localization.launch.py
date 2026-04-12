@@ -142,7 +142,7 @@ def generate_launch_description():
             name='imu_filter_madgwick',
             output='screen',
             parameters=[imu_filter_config_file, {'use_sim_time': True}],
-            remappings=[('/imu/data_raw', '/imu/with_gravity')],
+            remappings=[('/imu/data_raw', '/imu/with_gravity'), ('/imu/mag', '/magnetometer')],
         ),
         # Republisher: subscribes to Madgwick output (/imu/data), publishes to /imu_ekf (no changes elsewhere)
         Node(
@@ -172,8 +172,71 @@ def generate_launch_description():
             executable='marid_odom_pub.py',
             name='marid_odom_node',
             output='screen',
-            parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+            parameters=[{
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
+                # Sim IMU is low-noise: 20 samples (~0.2s) is enough to estimate bias
+                'calibration_required': 20,
+            }],
         ),
+        # Wheel odometry — taxiing position from joint velocities + IMU heading.
+        # Only integrates while sonar AGL <= 0.30 m (wheels on ground).
+        # Publishes /wheel/odometry for the EKF to fuse during ground operations.
+        Node(
+            package='marid_localization',
+            executable='wheel_odometry.py',
+            name='wheel_odometry_node',
+            output='screen',
+            parameters=[{
+                'front_wheel_radius': 0.089,
+                'rear_wheel_radius':  0.080,
+                'ground_threshold':   0.30,
+                'publish_tf':         False,
+                'use_sim_time':       True,
+            }],
+            remappings=[('/joint_states', '/world/empty/model/marid/joint_state')],
+        ),
+
+        # Optical flow velocity estimator - downward camera + sonar → body-frame velocity
+        Node(
+            package='marid_localization',
+            executable='optical_flow_estimator.py',
+            name='optical_flow_estimator',
+            output='screen',
+            parameters=[{
+                'camera_topic': '/optical_flow/camera',
+                'sonar_topic': '/sonar/scan',
+                'output_topic': '/optical_flow/velocity',
+                'sonar_range_topic': '/sonar/range',
+                'image_width': 320,
+                'image_height': 240,
+                'horizontal_fov': 1.047,     # 60 deg
+                'sign_vx': 1.0,             
+                'sign_vy': 1.0,
+                'min_altitude': 0.3,
+                'max_altitude': 5.0,
+                'velocity_variance': 0.05,
+                'use_sim_time': True,
+            }],
+        ),
+
+        # Forward camera velocity estimator — LK sparse flow, gyro-compensated.
+        # Provides lateral (vy) and vertical (vz) body-frame velocity from the
+        # forward-facing camera. Active above min_altitude when downward OF drops out.
+        Node(
+            package='marid_localization',
+            executable='forward_flow_estimator.py',
+            name='forward_flow_estimator',
+            output='screen',
+            parameters=[{
+                'camera_topic':        '/camera/image_raw',
+                'output_topic':        '/forward_camera/velocity',
+                'min_altitude':        1.0,
+                'depth_scale':         3.0,
+                'velocity_variance':   0.1,
+                'use_sim_time':        True,
+            }],
+        ),
+
         # Airspeed converter - converts gz.msgs.AirSpeed to std_msgs/Float64
         Node(
             package='marid_localization',

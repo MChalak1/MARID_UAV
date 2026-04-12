@@ -2,7 +2,7 @@
     ros__parameters:
         common:
             lid_topic:  "/lidar/scan/points_timed"
-            imu_topic:  "/imu"
+            imu_topic:  "/imu_ekf"
             time_sync_en: false
             time_offset_lidar_to_imu: 0.0
         preprocess:
@@ -19,7 +19,7 @@
             fov_degree:    360.0
             det_range:     100.0
             extrinsic_est_en:  false
-            extrinsic_T: [0.0, 0.0, 0.15]
+            extrinsic_T: [0.0, 0.0, 0.05]
             extrinsic_R: [1.0,  0.0, 0.0,
                            0.0, 1.0, 0.0,
                            0.0,  0.0, 1.0]

@@ -1,6 +1,15 @@
 <?xml version="1.0"?>
 <robot name="marid" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+    <!-- Joint state publisher — exposes all joint positions and velocities on
+         /world/empty/model/marid/joint_state (gz.msgs.Model), bridged to
+         /joint_states (sensor_msgs/JointState) for the wheel odometry node. -->
+    <gazebo>
+      <plugin filename="gz-sim-joint-state-publisher-system"
+              name="gz::sim::systems::JointStatePublisher">
+      </plugin>
+    </gazebo>
+
     <!-- WIND ENABLE -->
     <gazebo>
       <enable_wind>false</enable_wind>
@@ -514,6 +523,71 @@
           <mean>0.0</mean>
           <stddev>5.0</stddev>
         </noise>
+      </sensor>
+    </gazebo>
+
+    <!-- Optical Flow Camera - downward facing, 320x240, 30 Hz -->
+    <!-- Joint rpy="0 1.5708 0" makes sensor +X point down, so camera looks at ground -->
+    <gazebo reference="optical_flow_link">
+      <sensor name="optical_flow_camera" type="camera">
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+        <topic>/optical_flow/camera</topic>
+        <gz_frame_id>optical_flow_link</gz_frame_id>
+        <camera>
+          <horizontal_fov>1.047</horizontal_fov>  <!-- 60 deg -->
+          <image>
+            <width>320</width>
+            <height>240</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.05</near>
+            <far>15</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>1.5</stddev>
+          </noise>
+        </camera>
+      </sensor>
+    </gazebo>
+
+    <!-- Sonar Rangefinder - single downward beam, 0.05-5 m, 25 Hz -->
+    <!-- Joint rpy="0 1.5708 0" makes sensor +X point down; lidar emits along +X -->
+    <gazebo reference="sonar_link">
+      <sensor name="sonar" type="gpu_lidar">
+        <always_on>true</always_on>
+        <update_rate>25</update_rate>
+        <topic>/sonar/scan</topic>
+        <gz_frame_id>sonar_link</gz_frame_id>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.05</min>
+            <max>5.0</max>
+            <resolution>0.01</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.02</stddev>
+          </noise>
+        </ray>
       </sensor>
     </gazebo>
 

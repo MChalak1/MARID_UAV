@@ -63,11 +63,11 @@ ekf_filter_node_odom:
 
     # FAST-LIO LiDAR-inertial odometry (publishes in camera_init frame, aligned to odom at startup)
     # Lower covariance than /gazebo/odom so FAST-LIO dominates position estimates.
-    # Orientation is intentionally excluded — IMU/Madgwick is more reliable for attitude.
+    # Currently diabled to get ground-truth from Gazebo for testing; re-enable once EKF is stable and FAST-LIO is reliable.
     odom1: /Odometry
-    odom1_config: [true,  true,  true,    # X, Y, Z position from LiDAR odometry
+    odom1_config: [false,  false,  false,    # X, Y, Z position from LiDAR odometry
                    false, false, false,   # Skip orientation (IMU is better for attitude)
-                   true,  true,  true,    # X, Y, Z velocities
+                   false,  false,  false,    # X, Y, Z velocities
                    false, false, false,
                    false, false, false]
     odom1_differential: false

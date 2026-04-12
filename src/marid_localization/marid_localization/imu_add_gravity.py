@@ -36,8 +36,19 @@ class ImuAddGravity(Node):
         ]
 
     def cb_raw(self, msg):
-        if self.last_q is not None:
-            R = quaternion_matrix(self.last_q)[:3, :3]  # body-to-world
+        # Prefer the Madgwick output orientation; fall back to the raw IMU orientation
+        # (Gazebo provides it via enable_orientation=true).  Never fall back to world-frame
+        # gravity directly — that would be wrong if the sensor is tilted at startup.
+        q = self.last_q
+        if q is None:
+            q = [msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]
+            # If raw IMU also has no orientation yet (all zeros), skip adding gravity;
+            # Madgwick will converge from accel alone in the first few frames.
+            norm2 = sum(v * v for v in q)
+            if norm2 < 0.5:
+                q = None
+        if q is not None:
+            R = quaternion_matrix(q)[:3, :3]  # body-to-world
             g_body = R.T @ G_WORLD
         else:
             g_body = G_WORLD.copy()

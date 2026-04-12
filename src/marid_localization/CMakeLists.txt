@@ -31,6 +31,9 @@ install(PROGRAMS
   marid_localization/airspeed_converter.py
   marid_localization/wind_estimator.py
   marid_localization/lidar_time_field.py
+  marid_localization/optical_flow_estimator.py
+  marid_localization/wheel_odometry.py
+  marid_localization/forward_flow_estimator.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

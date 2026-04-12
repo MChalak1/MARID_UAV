@@ -46,7 +46,8 @@ def generate_launch_description():
         package="robot_state_publisher",
         executable="robot_state_publisher",
         parameters=[{"robot_description": robot_description,
-                     "use_sim_time": True}]
+                     "use_sim_time": True}],
+        remappings=[('joint_states', '/world/empty/model/marid/joint_state')]
     )
 
 
@@ -108,11 +109,19 @@ def generate_launch_description():
         "/model/marid/joint/tail_left_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
         "/model/marid/joint/tail_right_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
         "/airspeed@ros_gz_interfaces/msg/AirSpeed[gz.msgs.AirSpeed",
+        "/magnetometer@sensor_msgs/msg/MagneticField[gz.msgs.Magnetometer",
         "/lidar/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
         # Camera bridge (ROS <-> Gazebo):
         "/camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image",
         "/camera/image_hud@sensor_msgs/msg/Image]gz.msgs.Image",
         "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+        # Optical flow downward camera
+        "/optical_flow/camera@sensor_msgs/msg/Image[gz.msgs.Image",
+        "/optical_flow/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+        # Sonar rangefinder (single-beam gpu_lidar → LaserScan)
+        "/sonar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
+        # Wheel joint states (all joints) — used by wheel_odometry node for taxiing odometry
+        "/world/empty/model/marid/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model",
     ],
     output='screen'
     )

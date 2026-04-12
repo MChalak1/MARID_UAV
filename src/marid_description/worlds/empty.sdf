@@ -118,9 +118,380 @@
             </plane>
           </geometry>
           <material>
-            <ambient>0.800000012 0.800000012 0.800000012 1</ambient>
-            <diffuse>0.800000012 0.800000012 0.800000012 1</diffuse>
-            <specular>0.800000012 0.800000012 0.800000012 1</specular>
+            <ambient>0.18 0.18 0.18 1</ambient>
+            <diffuse>0.18 0.18 0.18 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_body'>
+          <pose>0 0 0.002 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>96 8 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.10 0.10 0.10 1</ambient>
+            <diffuse>0.10 0.10 0.10 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_centerline_1'>
+          <pose>-42 0 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>4 0.2 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_centerline_2'>
+          <pose>-30 0 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>4 0.2 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_centerline_3'>
+          <pose>-18 0 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>4 0.2 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_centerline_4'>
+          <pose>-6 0 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>4 0.2 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_centerline_5'>
+          <pose>6 0 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>4 0.2 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_centerline_6'>
+          <pose>18 0 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>4 0.2 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_centerline_7'>
+          <pose>30 0 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>4 0.2 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_centerline_8'>
+          <pose>42 0 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>4 0.2 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_edge_left'>
+          <pose>0 -3.7 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>96 0.15 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_edge_right'>
+          <pose>0 3.7 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>96 0.15 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_light_left_1'>
+          <pose>-42 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_2'>
+          <pose>-36 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_3'>
+          <pose>-30 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_4'>
+          <pose>-24 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_5'>
+          <pose>-18 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_6'>
+          <pose>-12 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_7'>
+          <pose>-6 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_8'>
+          <pose>0 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_9'>
+          <pose>6 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_10'>
+          <pose>12 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_11'>
+          <pose>18 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_12'>
+          <pose>24 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_13'>
+          <pose>30 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_14'>
+          <pose>36 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_left_15'>
+          <pose>42 -3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_1'>
+          <pose>-39 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_2'>
+          <pose>-33 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_3'>
+          <pose>-27 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_4'>
+          <pose>-21 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_5'>
+          <pose>-15 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_6'>
+          <pose>-9 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_7'>
+          <pose>-3 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_8'>
+          <pose>3 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_9'>
+          <pose>9 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_10'>
+          <pose>15 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_11'>
+          <pose>21 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_12'>
+          <pose>27 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_13'>
+          <pose>33 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_14'>
+          <pose>39 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_light_right_15'>
+          <pose>45 3.45 0.16 0 0 0</pose>
+          <geometry><cylinder><radius>0.04</radius><length>0.30</length></cylinder></geometry>
+          <material><ambient>0.85 0.90 1.00 1</ambient><diffuse>0.85 0.90 1.00 1</diffuse><specular>0.20 0.20 0.20 1</specular></material>
+        </visual>
+        <visual name='runway_threshold_left_1'>
+          <pose>-46 -1.4 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.2 0.5 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_threshold_left_2'>
+          <pose>-46 -0.4 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.2 0.5 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_threshold_left_3'>
+          <pose>-46 0.6 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.2 0.5 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_threshold_right_1'>
+          <pose>-46 1.4 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.2 0.5 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_threshold_right_2'>
+          <pose>-46 0.4 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.2 0.5 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
+          </material>
+        </visual>
+        <visual name='runway_threshold_right_3'>
+          <pose>-36 -0.6 0.003 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.2 0.5 0.001</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.95 0.95 1</ambient>
+            <diffuse>0.95 0.95 0.95 1</diffuse>
+            <specular>0.10 0.10 0.10 1</specular>
           </material>
         </visual>
         <pose>0 0 0 0 0 0</pose>
