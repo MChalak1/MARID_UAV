@@ -174,8 +174,8 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
-                # Sim IMU is low-noise: 20 samples (~0.2s) is enough to estimate bias
                 'calibration_required': 20,
+                'use_fastlio': False,
             }],
         ),
         # Wheel odometry — taxiing position from joint velocities + IMU heading.
@@ -244,7 +244,7 @@ def generate_launch_description():
             name='airspeed_converter',
             output='screen',
             parameters=[{
-                'input_topic': '/airspeed',
+                'gz_topic': '/airspeed',
                 'output_topic': '/airspeed/velocity',
             }]
         ),
@@ -275,6 +275,19 @@ def generate_launch_description():
                 'sea_level_pressure': 101325.0,  # Pa
                 'sea_level_temperature': 288.15,  # K (15°C)
                 'use_sim_time': True,
+            }]
+        ),
+
+        # VX error monitor — compares ground truth vs estimated forward velocity for PlotJuggler
+        Node(
+            package='marid_localization',
+            executable='vx_error_monitor.py',
+            name='vx_error_monitor',
+            output='screen',
+            parameters=[{
+                'gt_topic':  '/gazebo/odom',
+                'est_topic': '/marid/odom',
+                'min_speed': 0.5,
             }]
         ),
     ])

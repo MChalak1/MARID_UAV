@@ -34,6 +34,7 @@ install(PROGRAMS
   marid_localization/optical_flow_estimator.py
   marid_localization/wheel_odometry.py
   marid_localization/forward_flow_estimator.py
+  marid_localization/vx_error_monitor.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
