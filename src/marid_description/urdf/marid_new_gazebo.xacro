@@ -92,7 +92,7 @@
             <CLa>5.015</CLa>
             <CD0>0.04</CD0>
             <Cem0>-0.03</Cem0>   <!-- Flipped for X-forward: reduce nose-down tendency -->
-            <Cema>0.463966</Cema>
+            <Cema>-0.463966</Cema>
             <CYb>-0.258244</CYb>
             <Cellb>-0.03925</Cellb>
             <Cenb>0.100826</Cenb>
@@ -120,7 +120,7 @@
             <Cema_stall>0</Cema_stall>
 
             <!-- Aerodynamic reference geometry (scaled for larger MARID airframe) -->
-            <cp>-1.876 0 0.306</cp>          <!-- Aerodynamic center in base_link_front frame -->
+            <cp>-1.98 0 0.306</cp>            <!-- Aerodynamic center: moved aft of CG (~-1.941m) for +11% MAC static margin -->
             <area>2.0</area>        <!-- Reference area (m²) - scaled up for bigger drone -->
             <mac>0.35</mac>         <!-- Mean aerodynamic chord (m) - scaled for bigger drone -->
             <air_density>1.225</air_density>
@@ -139,7 +139,7 @@
             <control_surface>
                 <name>left_wing_joint</name>
                 <index>0</index>
-                <direction>-1</direction>   <!-- Same direction as right wing; differential deflection gives roll -->
+                <direction>-1</direction>   <!-- -1: negative deflection = trailing edge up = increase CL and pitch-up moment -->
                 <!-- Coefficients copied from reference servo_0 as a starting point -->
                 <CL_ctrl>2.0</CL_ctrl>
                 <CD_ctrl>0.08</CD_ctrl>
@@ -182,7 +182,7 @@
                 <name>tail_right_joint</name>
                 <index>3</index>
                 <direction>1</direction>
-                              
+
                 <CL_ctrl>0.2</CL_ctrl>
                 <CD_ctrl>0.02</CD_ctrl>
 
@@ -476,19 +476,19 @@
           <x>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.01</stddev>
+              <stddev>5e-8</stddev>
             </noise>
           </x>
           <y>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.01</stddev>
+              <stddev>5e-8</stddev>
             </noise>
           </y>
           <z>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.01</stddev>
+              <stddev>5e-8</stddev>
             </noise>
           </z>
         </magnetometer>
@@ -521,7 +521,7 @@
         <topic>/baro/pressure</topic>
         <noise type="gaussian">
           <mean>0.0</mean>
-          <stddev>5.0</stddev>
+          <stddev>0.5</stddev>
         </noise>
       </sensor>
     </gazebo>

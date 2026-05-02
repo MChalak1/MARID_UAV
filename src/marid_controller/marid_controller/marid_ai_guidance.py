@@ -105,6 +105,10 @@ class MaridAIGuidance(Node):
         self.declare_parameter('max_heading_rate', 0.5)  # rad/s
         self.declare_parameter('min_speed', 10.0)  # m/s
         self.declare_parameter('max_speed', 200.0)  # m/s
+
+        # Altitude gate: must reach and hold target altitude before navigating
+        self.declare_parameter('altitude_tolerance', 0.5)    # m — how close counts as "at altitude"
+        self.declare_parameter('altitude_stable_duration', 2.0)  # s — how long to hold before navigating
         
         # Get parameters
         self.control_mode_ = self.get_parameter('control_mode').value
@@ -150,12 +154,18 @@ class MaridAIGuidance(Node):
         self.max_heading_rate_ = self.get_parameter('max_heading_rate').value
         self.min_speed_ = self.get_parameter('min_speed').value
         self.max_speed_ = self.get_parameter('max_speed').value
-        
+        self.altitude_tolerance_ = self.get_parameter('altitude_tolerance').value
+        self.altitude_stable_duration_ = self.get_parameter('altitude_stable_duration').value
+
         # State variables
         self.current_odom_ = None
         self.current_imu_ = None
         self.current_altitude_ = None
         self.waypoint_reached_ = False
+
+        # Flight phase gate: CLIMB until target altitude is stable, then NAVIGATE
+        self.flight_phase_ = 'climb'
+        self._altitude_stable_since_ = None
         
         # AI Model and Normalizer
         self.ai_model_ = None
@@ -212,12 +222,7 @@ class MaridAIGuidance(Node):
         )
         
         # Publishers - GUIDANCE TARGETS (not actuator commands!)
-        self.desired_heading_rate_pub_ = self.create_publisher(
-            Float64,
-            '/marid/guidance/desired_heading_rate',
-            10
-        )
-        
+        # desired_heading_rate is disabled: yaw is handled by attitude controller via tail surfaces.
         self.desired_speed_pub_ = self.create_publisher(
             Float64,
             '/marid/guidance/desired_speed',
@@ -379,9 +384,8 @@ class MaridAIGuidance(Node):
         desired_heading, distance = self.compute_waypoint_heading(state)
         
         if desired_heading is None:
-            # Waypoint reached - maintain current heading, slow down
             self.waypoint_reached_ = True
-            return 0.0, 0.0
+            return 0.0, self.min_speed_
         
         # Compute desired heading rate from heading error
         current_yaw = state[8]
@@ -399,10 +403,8 @@ class MaridAIGuidance(Node):
         desired_heading_rate = heading_rate_gain * heading_error
         desired_heading_rate = np.clip(desired_heading_rate, -self.max_heading_rate_, self.max_heading_rate_)
         
-        # Desired speed based on distance to waypoint
-        # Closer to waypoint = slower (for precision landing)
-        distance_factor = min(1.0, distance / 100.0)  # Scale down within 100m
-        desired_speed = self.target_velocity_ * distance_factor
+        distance_factor = min(1.0, distance / 100.0)
+        desired_speed = max(self.min_speed_, self.target_velocity_ * distance_factor)
         desired_speed = np.clip(desired_speed, self.min_speed_, self.max_speed_)
         
         return desired_heading_rate, desired_speed
@@ -472,36 +474,64 @@ class MaridAIGuidance(Node):
         """Main guidance loop - computes and publishes guidance targets"""
         if self.current_odom_ is None:
             return
-        
+
         state = self.get_state_vector()
-        
-        # Check for invalid state
+
         if np.any(np.isnan(state)) or np.any(np.isinf(state)):
             self.get_logger().warn('Invalid state detected (NaN/inf), skipping guidance update')
             return
-        
-        # Compute guidance targets
+
+        # Resolve current altitude (barometer preferred, odom fallback)
+        current_altitude = self.current_altitude_ if self.current_altitude_ is not None else state[2]
+
+        # ── PHASE 1: CLIMB ───────────────────────────────────────────────────
+        # Fly straight at cruise speed until target altitude is stable.
+        # The attitude controller and guidance tracker altitude PIDs do the climbing.
+        if self.flight_phase_ == 'climb':
+            altitude_error = abs(current_altitude - self.target_altitude_)
+
+            if altitude_error <= self.altitude_tolerance_:
+                if self._altitude_stable_since_ is None:
+                    self._altitude_stable_since_ = self.get_clock().now()
+                stable_secs = (self.get_clock().now() - self._altitude_stable_since_).nanoseconds / 1e9
+                if stable_secs >= self.altitude_stable_duration_:
+                    self.flight_phase_ = 'navigate'
+                    self.get_logger().info(
+                        f'Altitude gate cleared — {current_altitude:.1f} m held within '
+                        f'±{self.altitude_tolerance_} m of target {self.target_altitude_:.1f} m '
+                        f'for {self.altitude_stable_duration_:.1f} s. Beginning navigation.'
+                    )
+            else:
+                self._altitude_stable_since_ = None
+
+            speed_msg = Float64()
+            speed_msg.data = float(self.target_velocity_)
+            self.desired_speed_pub_.publish(speed_msg)
+
+            mode_msg = String()
+            mode_msg.data = 'climb'
+            self.guidance_mode_pub_.publish(mode_msg)
+
+            status_msg = Bool()
+            status_msg.data = False
+            self.waypoint_status_pub_.publish(status_msg)
+            return
+
+        # ── PHASE 2: NAVIGATE ────────────────────────────────────────────────
         if self.control_mode_ == 'ai' and self.ai_model_ is not None:
             desired_heading_rate, desired_speed = self.compute_ai_guidance(state)
         else:
             desired_heading_rate, desired_speed = self.compute_pid_guidance(state)
-            self.control_mode_ = 'pid'  # Ensure mode is set correctly
-        
-        # Publish guidance targets (NOT actuator commands!)
-        heading_rate_msg = Float64()
-        heading_rate_msg.data = float(desired_heading_rate)
-        self.desired_heading_rate_pub_.publish(heading_rate_msg)
-        
+            self.control_mode_ = 'pid'
+
         speed_msg = Float64()
         speed_msg.data = float(desired_speed)
         self.desired_speed_pub_.publish(speed_msg)
-        
-        # Publish guidance mode
+
         mode_msg = String()
         mode_msg.data = self.control_mode_
         self.guidance_mode_pub_.publish(mode_msg)
-        
-        # Publish waypoint status
+
         status_msg = Bool()
         status_msg.data = self.waypoint_reached_
         self.waypoint_status_pub_.publish(status_msg)

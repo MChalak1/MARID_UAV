@@ -68,7 +68,7 @@ class MaridThrustController(Node):
         # Parameters
         self.declare_parameter('initial_thrust', 1.0)        # Initial thrust in Newtons
         self.declare_parameter('min_thrust', 0.0)             # Minimum thrust (N)
-        self.declare_parameter('max_thrust', 5000.0)          # Maximum thrust (N) - can be None for auto-calculation
+        self.declare_parameter('max_thrust', 30000.0)          # Maximum thrust (N) - can be None for auto-calculation
         self.declare_parameter('thrust_to_weight_ratio', 2.5)  # Thrust-to-weight ratio (if max_thrust is None)
         self.declare_parameter('base_thrust_override', -1.0)  # Override auto-calculation if set (N), -1.0 means not set
         self.declare_parameter('thrust_increment', 1.0)       # Thrust increment per keypress (N)
@@ -79,8 +79,8 @@ class MaridThrustController(Node):
         self.declare_parameter('enable_keyboard', True)       # Enable keyboard control
         self.declare_parameter('enable_differential', False)  # Enable differential thrust for yaw control
         self.declare_parameter('thrust_to_angvel_gain', 50.0)  # Conversion factor: omega = gain * sqrt(thrust)
-        self.declare_parameter('use_thruster_plugin', True)    # Use Gazebo Thruster plugin (True) or legacy wrench (False)
-        self.declare_parameter('use_center_thruster', False)   # Use single center thruster (True) or dual left/right (False)
+        self.declare_parameter('use_thruster_plugin', False)    # Use Gazebo Thruster plugin (True) or legacy wrench (False)
+        self.declare_parameter('use_center_thruster', True)   # Use single center thruster (True) or dual left/right (False)
         self.declare_parameter('thrust_rate_limit', 450.0)       # Max change rate (N/s) for smooth transitions
         self.declare_parameter('thrust_smoothing_factor', 0.45)  # Exponential smoothing: 0.0 = no smoothing, 1.0 = full smoothing
         

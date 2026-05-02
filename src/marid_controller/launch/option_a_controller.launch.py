@@ -94,7 +94,7 @@ def launch_setup(context):
                 'initial_thrust': initial_thrust,
                 'min_thrust': 0.0,
                 'thrust_to_weight_ratio': 0.65,  # Reduced from 2.5: gives max thrust ~1.3x weight (reasonable for aircraft)
-                'thrust_increment': 10.0,
+                'thrust_increment': 100.0,
                 'world_name': 'wt',
                 'model_name': 'marid',
                 'link_name': 'base_link_front',
@@ -134,7 +134,7 @@ def launch_setup(context):
                         'datum_longitude': datum_lon,
                         # Guidance parameters
                         'target_altitude': 5.0,  # m
-                        'target_velocity': 70.0,  # m/s
+                        'target_velocity': 80.0,  # m/s — equilibrium ~80 m/s, above 77.5 m/s rotation speed
                         'altitude_min': 3.0,  # m
                         'altitude_max': 10.0,  # m
                         'waypoint_tolerance': 2.0,  # m
@@ -142,6 +142,9 @@ def launch_setup(context):
                         'max_heading_rate': 0.5,  # rad/s
                         'min_speed': 10.0,  # m/s
                         'max_speed': 100.0,  # m/s
+                        # Altitude gate: hold target altitude before navigating
+                        'altitude_tolerance': 0.5,        # m — band around target altitude
+                        'altitude_stable_duration': 2.0,  # s — hold time before phase transition
                         'use_sim_time': True,
                     }]
                 )
@@ -165,23 +168,19 @@ def launch_setup(context):
                         'base_thrust_override': -1.0, # Fixed thrust (overrides PID calculations)
                         'thrust_to_weight_ratio': 0.65,  # Not used when override is set
                         'min_thrust': 0.0,
-                        'max_yaw_differential': 0.2,
                         # Physics-based thrust (disabled for fixed thrust test)
                         'use_physics_thrust': True,
                         'use_airspeed_sensor': True,
-                        'drag_coefficient': 0.1,  # Tune based on your model
+                        'drag_coefficient': 0.25,  
                         'air_density': 1.225,  # kg/m³ at sea level
                         # Wind vector (from world file: [0, 0, 0] m/s - disabled for testing)
                         'wind_x': 0.0,
                         'wind_y': 0.0,
                         'wind_z': 0.0,
                         # PID gains (disabled for fixed thrust test, but can still be used for attitude control)
-                        'speed_kp': 0.0,  # Disabled - not used when override is set
-                        'speed_ki': 0.0,
-                        'speed_kd': 0.0,
-                        'heading_rate_kp': 1.0,  # Still active for yaw control
-                        'heading_rate_ki': 0.1,
-                        'heading_rate_kd': 0.3,
+                        'speed_kp': 0.5,  # Feedforward correction (base_thrust_override is -1.0, so PID is active)
+                        'speed_ki': 0.02,
+                        'speed_kd': 0.1,
                         # Altitude control (re-enabled for altitude maintenance)
                         'altitude_kp': 2.0,  # Re-enable for altitude maintenance
                         'altitude_ki': 0.1,
@@ -221,6 +220,9 @@ def launch_setup(context):
                         # Altitude control (tail/wings pitch - works with thrust)
                         'target_altitude': 5.0,
                         'altitude_pitch_gain': 0.2,
+                        'climb_wing_incidence': 0.0,  # rad — fixed wing AoA during climb
+                        'airborne_altitude_threshold': 0.5,  # m — no pitch command below this (on ground)
+                        'pitch_slew_rate': 0.087,  # rad/s — ~5°/s max nose-up rate after liftoff
                         # Waypoint navigation (for attitude control) - use local coordinates if set, otherwise GPS
                         'destination_latitude': destination_lat if not use_local_coords else -1.0,
                         'destination_longitude': destination_lon if not use_local_coords else -1.0,

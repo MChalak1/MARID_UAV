@@ -516,7 +516,7 @@
       <pose>0 0 10 0 0 0</pose>
       <cast_shadows>true</cast_shadows>
       <intensity>1</intensity>
-      <direction>-0.5 0.10000000000000001 -0.90000000000000002</direction>
+      <direction>-0.277 0.377 -0.884</direction>
       <diffuse>0.800000012 0.800000012 0.800000012 1</diffuse>
       <specular>0.200000003 0.200000003 0.200000003 1</specular>
       <attenuation>

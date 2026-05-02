@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-VX Error Monitor
+State Error Monitor
 
-Compares ground-truth body-frame forward velocity (/gazebo/odom) against the
-node estimate (/marid/odom) and publishes percentage error and raw signals for
-PlotJuggler visualisation.
+Compares ground-truth state (/gazebo/odom) against the node estimate
+(/marid/odom) and publishes absolute and percentage errors for position
+(x, y, z) and velocity (vx, vy, vz).
 
-Published topics:
-  /debug/vx_gt          std_msgs/Float64  — ground truth vx (body frame)
-  /debug/vx_est         std_msgs/Float64  — estimated vx (body frame)
-  /debug/vx_error_pct   std_msgs/Float64  — |gt - est| / max(|gt|, min_speed) × 100
-  /debug/vx_error_abs   std_msgs/Float64  — |gt - est| in m/s
+Published topics for each channel <ch> in {x, y, z, vx, vy, vz}:
+  /debug/<ch>_gt          std_msgs/Float64  — ground truth
+  /debug/<ch>_est         std_msgs/Float64  — estimate
+  /debug/<ch>_error_abs   std_msgs/Float64  — |gt − est|
+  /debug/<ch>_error_pct   std_msgs/Float64  — |gt − est| / max(|gt|, min_ref) × 100
+                                              published only when |gt| ≥ min_ref
+
+min_ref is min_pos for position channels and min_speed for velocity channels.
 """
 
 import math
@@ -20,59 +23,85 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64
 
 
+_CHANNELS = ('x', 'y', 'z', 'vx', 'vy', 'vz')
+
+
+def _extract(msg: Odometry):
+    """Return (x, y, z, vx, vy, vz) from an Odometry message."""
+    p = msg.pose.pose.position
+    v = msg.twist.twist.linear
+    return (p.x, p.y, p.z, v.x, v.y, v.z)
+
+
 class VxErrorMonitor(Node):
     def __init__(self):
         super().__init__('vx_error_monitor')
 
         self.declare_parameter('gt_topic',  '/gazebo/odom')
         self.declare_parameter('est_topic', '/marid/odom')
-        self.declare_parameter('min_speed',  0.5)   # m/s — suppress % error below this
+        self.declare_parameter('min_speed',  0.5)   # m/s — velocity % denominator floor
+        self.declare_parameter('min_pos',    1.0)   # m   — position % denominator floor
 
         self.gt_topic_  = self.get_parameter('gt_topic').value
         self.est_topic_ = self.get_parameter('est_topic').value
-        self.min_speed_ = float(self.get_parameter('min_speed').value)
+        min_speed       = float(self.get_parameter('min_speed').value)
+        min_pos         = float(self.get_parameter('min_pos').value)
 
-        self.vx_gt_  = None
-        self.vx_est_ = None
+        # min_ref indexed by channel: first 3 are position, last 3 are velocity
+        self._min_ref = [min_pos, min_pos, min_pos,
+                         min_speed, min_speed, min_speed]
 
-        self.create_subscription(Odometry, self.gt_topic_,  self.gt_cb,  10)
-        self.create_subscription(Odometry, self.est_topic_, self.est_cb, 10)
+        # Latest ground-truth and estimate values (None until first message)
+        self._gt  = [None] * 6
+        self._est = [None] * 6
 
-        self.pub_gt_      = self.create_publisher(Float64, '/debug/vx_gt',        10)
-        self.pub_est_     = self.create_publisher(Float64, '/debug/vx_est',       10)
-        self.pub_err_pct_ = self.create_publisher(Float64, '/debug/vx_error_pct', 10)
-        self.pub_err_abs_ = self.create_publisher(Float64, '/debug/vx_error_abs', 10)
+        # Build publisher lists in channel order
+        self._pub_gt  = []
+        self._pub_est = []
+        self._pub_abs = []
+        self._pub_pct = []
+        for ch in _CHANNELS:
+            self._pub_gt.append( self.create_publisher(Float64, f'/debug/{ch}_gt',        10))
+            self._pub_est.append(self.create_publisher(Float64, f'/debug/{ch}_est',       10))
+            self._pub_abs.append(self.create_publisher(Float64, f'/debug/{ch}_error_abs', 10))
+            self._pub_pct.append(self.create_publisher(Float64, f'/debug/{ch}_error_pct', 10))
+
+        self.create_subscription(Odometry, self.gt_topic_,  self._gt_cb,  10)
+        self.create_subscription(Odometry, self.est_topic_, self._est_cb, 10)
 
         self.get_logger().info(
-            f'VxErrorMonitor ready  (gt={self.gt_topic_}, est={self.est_topic_}, '
-            f'min_speed={self.min_speed_} m/s)'
+            f'StateErrorMonitor ready  gt={self.gt_topic_}  est={self.est_topic_}  '
+            f'min_pos={min_pos} m  min_speed={min_speed} m/s'
         )
 
-    def gt_cb(self, msg: Odometry):
-        self.vx_gt_ = float(msg.twist.twist.linear.x)
+    def _gt_cb(self, msg: Odometry):
+        for i, v in enumerate(_extract(msg)):
+            self._gt[i] = float(v)
         self._publish()
 
-    def est_cb(self, msg: Odometry):
-        self.vx_est_ = float(msg.twist.twist.linear.x)
+    def _est_cb(self, msg: Odometry):
+        for i, v in enumerate(_extract(msg)):
+            self._est[i] = float(v)
         self._publish()
 
     def _publish(self):
-        if self.vx_gt_ is None or self.vx_est_ is None:
-            return
-        if not (math.isfinite(self.vx_gt_) and math.isfinite(self.vx_est_)):
-            return
+        for i in range(6):
+            gt  = self._gt[i]
+            est = self._est[i]
+            if gt is None or est is None:
+                continue
+            if not (math.isfinite(gt) and math.isfinite(est)):
+                continue
 
-        err_abs = abs(self.vx_gt_ - self.vx_est_)
-        denom   = max(abs(self.vx_gt_), self.min_speed_)
-        err_pct = (err_abs / denom) * 100.0
+            err_abs = abs(gt - est)
+            denom   = max(abs(gt), self._min_ref[i])
+            err_pct = (err_abs / denom) * 100.0
 
-        self.pub_gt_.publish(Float64(data=self.vx_gt_))
-        self.pub_est_.publish(Float64(data=self.vx_est_))
-        self.pub_err_abs_.publish(Float64(data=err_abs))
-
-        # Only publish % error when drone is moving fast enough to be meaningful
-        if abs(self.vx_gt_) >= self.min_speed_:
-            self.pub_err_pct_.publish(Float64(data=err_pct))
+            self._pub_gt[i].publish( Float64(data=gt))
+            self._pub_est[i].publish(Float64(data=est))
+            self._pub_abs[i].publish(Float64(data=err_abs))
+            if abs(gt) >= self._min_ref[i]:
+                self._pub_pct[i].publish(Float64(data=err_pct))
 
 
 def main():

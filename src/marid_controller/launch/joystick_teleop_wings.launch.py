@@ -38,11 +38,18 @@ def generate_launch_description():
         parameters=[{"front_gain": 1.0, "tail_gain": 1.0}],
     )
 
+    joy_incrementer = Node(
+        package="marid_controller",
+        executable="joy_incrementer.py",
+        output="screen",
+    )
+
     return LaunchDescription(
         [
             joy_node,
             joy_teleop,
             cmd_vel_to_wings,
+            joy_incrementer,
         ]
     )
 

@@ -176,6 +176,8 @@ def generate_launch_description():
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
                 'calibration_required': 20,
                 'use_fastlio': False,
+                'use_eskf': True,
+                'eskf_mode': 'physics',
             }],
         ),
         # Wheel odometry — taxiing position from joint velocities + IMU heading.
@@ -278,7 +280,8 @@ def generate_launch_description():
             }]
         ),
 
-        # VX error monitor — compares ground truth vs estimated forward velocity for PlotJuggler
+        # State error monitor — compares ground truth vs estimate for x,y,z,vx,vy,vz
+        # Publishes /debug/<ch>_{gt,est,error_abs,error_pct} for all 6 channels.
         Node(
             package='marid_localization',
             executable='vx_error_monitor.py',
@@ -287,7 +290,26 @@ def generate_launch_description():
             parameters=[{
                 'gt_topic':  '/gazebo/odom',
                 'est_topic': '/marid/odom',
-                'min_speed': 0.5,
+                'min_speed': 0.5,   # m/s — velocity % gate
+                'min_pos':   1.0,   # m   — position % gate
+            }]
+        ),
+
+        # Simulated sun sensor — computes solar position from sim time + lat/lon,
+        # rotates sun ENU vector into body frame using Gazebo ground-truth pose,
+        # and publishes the body-frame sun vector + ENU azimuth for heading correction.
+        Node(
+            package='marid_localization',
+            executable='sun_sensor_sim.py',
+            name='sun_sensor_sim',
+            output='screen',
+            parameters=[{
+                'lat_deg':               37.4,
+                'lon_deg':              -122.1,
+                'reference_utc':        '2026-04-26T19:00:00',
+                'sun_elevation_min_deg': 10.0,
+                'output_rate_hz':        20.0,
+                'use_sim_time':          True,
             }]
         ),
     ])

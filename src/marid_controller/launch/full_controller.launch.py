@@ -53,7 +53,7 @@ def generate_launch_description():
             parameters=[{
                 'initial_thrust': 0.0,         # Start at 0N (AI controller will set thrust)
                 'min_thrust': 0.0,
-                'max_thrust': 30.0,            # Can be None for auto-calculation
+                'max_thrust': 30000.0,            # Can be None for auto-calculation
                 'thrust_increment': 1.0,
                 'world_name': 'wt',
                 'model_name': 'marid',

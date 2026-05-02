@@ -7,9 +7,9 @@ Converts waypoint navigation commands into control surface deflections.
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, FluidPressure
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, String
 import numpy as np
 import math
 from tf_transformations import euler_from_quaternion
@@ -106,6 +106,10 @@ class MaridAttitudeController(Node):
         # Altitude control (tail/wings pitch for altitude hold)
         self.declare_parameter('target_altitude', 5.0)  # m
         self.declare_parameter('altitude_pitch_gain', 0.2)  # Pitch (rad) per m altitude error
+        self.declare_parameter('climb_wing_incidence', 0.0)  # Fixed wing incidence (rad) during climb phase
+        self.declare_parameter('airborne_altitude_threshold', 0.5)  # m — below this, no pitch command (on ground)
+        self.declare_parameter('airborne_speed_threshold', 20.0)   # m/s — must also exceed this to be considered airborne
+        self.declare_parameter('pitch_slew_rate', 0.087)  # rad/s — max rate desired_pitch can increase (~5°/s)
         
         # Get parameters
         self.update_rate_ = self.get_parameter('update_rate').value
@@ -149,6 +153,12 @@ class MaridAttitudeController(Node):
         self.waypoint_tolerance_ = self.get_parameter('waypoint_tolerance').value
         self.target_altitude_ = self.get_parameter('target_altitude').value
         self.altitude_pitch_gain_ = self.get_parameter('altitude_pitch_gain').value
+        self.climb_wing_incidence_ = self.get_parameter('climb_wing_incidence').value
+        self.airborne_altitude_threshold_ = self.get_parameter('airborne_altitude_threshold').value
+        self.airborne_speed_threshold_ = self.get_parameter('airborne_speed_threshold').value
+        self.pitch_slew_rate_ = self.get_parameter('pitch_slew_rate').value
+        self.current_speed_ = 0.0
+        self.slewed_pitch_ = 0.0
         
         # Determine destination
         if dest_lat != -1.0 and dest_lon != -1.0:
@@ -163,6 +173,9 @@ class MaridAttitudeController(Node):
             self.destination_ = None
             self.get_logger().warn('No destination set. Attitude control will maintain level flight.')
         
+        # Flight phase: 'climb' suppresses yaw until altitude is established
+        self.flight_phase_ = 'climb'
+
         # Current state
         self.current_odom_ = None
         self.current_imu_ = None
@@ -205,6 +218,13 @@ class MaridAttitudeController(Node):
             PoseWithCovarianceStamped,
             '/barometer/altitude',
             self.altitude_callback,
+            10
+        )
+
+        self.guidance_mode_sub_ = self.create_subscription(
+            String,
+            '/marid/guidance/mode',
+            self.guidance_mode_callback,
             10
         )
         
@@ -274,6 +294,11 @@ class MaridAttitudeController(Node):
         self.current_roll_ = roll
         self.current_pitch_ = pitch
         self.current_yaw_ = yaw
+
+        # Forward speed only: rotation speed is an airspeed threshold, not total vector magnitude.
+        # Using total magnitude amplifies EKF noise in lateral/vertical components.
+        vx = msg.twist.twist.linear.x
+        self.current_speed_ = abs(vx) if math.isfinite(vx) else 0.0
     
     def imu_callback(self, msg):
         """Extract angular rates from IMU (standard X-forward convention)"""
@@ -294,6 +319,10 @@ class MaridAttitudeController(Node):
     def altitude_callback(self, msg):
         """Store current altitude from barometer"""
         self.current_altitude_ = msg.pose.pose.position.z
+
+    def guidance_mode_callback(self, msg):
+        """Track flight phase published by AI guidance node"""
+        self.flight_phase_ = msg.data
     
     def _compute_altitude_pitch(self):
         """
@@ -373,16 +402,43 @@ class MaridAttitudeController(Node):
             return
         
         # Compute desired attitude from waypoint
-        desired_roll, desired_pitch, desired_yaw = self.compute_waypoint_commands()
-        
+        desired_roll, desired_pitch_target, desired_yaw = self.compute_waypoint_commands()
+
         # Safety check: ensure all desired values are valid
-        if not (np.isfinite(desired_roll) and np.isfinite(desired_pitch) and np.isfinite(desired_yaw)):
+        if not (np.isfinite(desired_roll) and np.isfinite(desired_pitch_target) and np.isfinite(desired_yaw)):
             self.get_logger().warn('Invalid desired attitude (NaN/inf), skipping control update')
             return
-        
+
         # Get current time
         current_time = self.get_clock().now().nanoseconds / 1e9
-        
+        dt = 1.0 / self.update_rate_
+
+        # Altitude gate + slew rate during climb:
+        # While on the ground (altitude < threshold) → no pitch command. The drone lifts off
+        # naturally when aerodynamic lift exceeds weight; no nose-up push is needed or safe.
+        # Once airborne → ramp desired_pitch toward target at pitch_slew_rate_ for controlled
+        # rotation that the PID can track without overshooting.
+        # Require both altitude (barometer) AND forward speed to be above threshold.
+        # Altitude alone is unreliable due to barometer noise (~0.04m/Pa → false positives
+        # at 0.5m threshold). Speed gate prevents pitch activation during ground roll.
+        airborne = (self.current_altitude_ is not None
+                    and math.isfinite(self.current_altitude_)
+                    and self.current_altitude_ >= self.airborne_altitude_threshold_
+                    and self.current_speed_ >= self.airborne_speed_threshold_)
+
+        if self.flight_phase_ == 'climb':
+            if not airborne:
+                desired_pitch = 0.0
+                self.slewed_pitch_ = 0.0
+            else:
+                step = self.pitch_slew_rate_ * dt
+                diff = desired_pitch_target - self.slewed_pitch_
+                self.slewed_pitch_ += math.copysign(min(abs(diff), step), diff)
+                desired_pitch = self.slewed_pitch_
+        else:
+            desired_pitch = desired_pitch_target
+            self.slewed_pitch_ = desired_pitch_target  # keep in sync for clean phase transition
+
         # Compute attitude errors
         roll_error = desired_roll - self.current_roll_
         pitch_error = desired_pitch - self.current_pitch_
@@ -397,25 +453,35 @@ class MaridAttitudeController(Node):
         # Update PID controllers
         roll_command = self.roll_pid_.update(roll_error, current_time)
         pitch_command = self.pitch_pid_.update(pitch_error, current_time)
-        yaw_command = -self.yaw_pid_.update(yaw_error, current_time)  # Invert sign to fix turning direction
-        
-        # Convert attitude commands to control surface deflections
-        # Control surface mapping:
-        # - Wings (left_wing_joint, right_wing_joint): Pitch control (symmetric) + Roll control (differential)
-        # - Tail (tail_left_joint, tail_right_joint): Yaw control (differential) + Pitch assist (symmetric)
-        
-        # Wing deflections:
-        # - Symmetric deflection for pitch (both wings same direction)
-        # - Differential deflection for roll (opposite directions)
-        left_wing_deflection = pitch_command + roll_command  # Positive roll = left wing up (right bank)
-        right_wing_deflection = pitch_command - roll_command  # Positive roll = right wing down (right bank)
-        
-        # Tail deflections:
-        # - Differential deflection for yaw (opposite directions)
-        # - Symmetric deflection for pitch assist (both same direction)
-        tail_pitch_assist = pitch_command * 0.5  # 50% pitch assist from tail (increased for better altitude control)
-        left_tail_deflection = tail_pitch_assist - yaw_command  # Negative yaw = left tail up
-        right_tail_deflection = tail_pitch_assist + yaw_command  # Positive yaw = right tail up
+        yaw_command = -self.yaw_pid_.update(yaw_error, current_time)
+
+        # Wing deflections: differential roll only during climb.
+        # During climb, front wings are pinned to a fixed positive incidence so they
+        # generate steady lift without fighting the V-tail's pitch authority.
+        # (Increasing front-wing incidence with the pitch PID creates a nose-down
+        # restoring moment that directly opposes the V-tail's nose-up command.)
+        if self.flight_phase_ == 'climb':
+            # Ground roll and initial climb: fixed incidence, no roll.
+            # Roll PID on the ground has no aerodynamic damping and rocks the airframe.
+            wing_pitch = self.climb_wing_incidence_
+            active_roll = 0.0
+        else:
+            wing_pitch = pitch_command
+            active_roll = roll_command
+        left_wing_deflection = wing_pitch + active_roll
+        right_wing_deflection = wing_pitch - active_roll
+
+        # V-tail: full pitch authority + differential yaw.
+        # During 'climb' phase the heading error to the distant waypoint is huge and
+        # would saturate the tail surfaces with yaw, leaving no range for pitch/lift.
+        # Suppress yaw authority until altitude is established.
+        tail_pitch_assist = pitch_command * 0.5
+        if self.flight_phase_ == 'climb':
+            active_yaw = 0.0
+        else:
+            active_yaw = yaw_command
+        left_tail_deflection = tail_pitch_assist - active_yaw
+        right_tail_deflection = tail_pitch_assist + active_yaw
         
         # Clamp deflections to joint limits
         wing_max = self.get_parameter('wing_max_deflection').value

@@ -37,6 +37,12 @@ class CmdVelToWings(Node):
             qos,
         )
 
+        self.teleop_vtail = 0.0
+        self.teleop_front_wing = 0.0
+
+        self.create_subscription(Float64, '/marid/teleop/vtail', self._vtail_cb, qos)
+        self.create_subscription(Float64, '/marid/teleop/front_wing', self._wing_cb, qos)
+
         # Directly command Gazebo joints
         self.left_wing_pub = self.create_publisher(
             Float64,
@@ -59,12 +65,11 @@ class CmdVelToWings(Node):
             qos,
         )
 
-        # Center thruster only
-        self.center_thrust_pub = self.create_publisher(
-            Float64,
-            "/model/marid/joint/thruster_center_joint/cmd_thrust",
-            qos,
-        )
+    def _vtail_cb(self, msg: Float64) -> None:
+        self.teleop_vtail = msg.data
+
+    def _wing_cb(self, msg: Float64) -> None:
+        self.teleop_front_wing = msg.data
 
     def cmd_vel_callback(self, msg: Twist) -> None:
         # Symmetric components from vertical stick motion
@@ -75,39 +80,18 @@ class CmdVelToWings(Node):
         roll_cmd = self.roll_gain * msg.linear.y        # left stick horizontal
         yaw_cmd = self.yaw_gain * msg.angular.y         # right stick horizontal
 
-        # Front wings: average ± roll differential
-        front_left = front_avg + roll_cmd
-        front_right = front_avg - roll_cmd
+        # Front wings: average ± roll differential + symmetric AOA offset
+        front_left = front_avg + roll_cmd + self.teleop_front_wing
+        front_right = front_avg - roll_cmd + self.teleop_front_wing
 
-        # Tail wings: average ± yaw differential
-        tail_left = tail_avg + yaw_cmd
-        tail_right = tail_avg - yaw_cmd
+        # Tail wings: average ± yaw differential + symmetric vtail offset
+        tail_left = tail_avg + yaw_cmd + self.teleop_vtail
+        tail_right = tail_avg - yaw_cmd + self.teleop_vtail
 
-        # Center thrust from linear.z (e.g. right trigger)
-        # Assume joystick axis in [-1, 1]; map to [0, 1]
-        raw_throttle = msg.linear.z
-        throttle_01 = 0.5 * (raw_throttle + 1.0)
-        thrust = self.thrust_gain * throttle_01
-
-        front_left_msg = Float64()
-        front_left_msg.data = front_left
-        self.left_wing_pub.publish(front_left_msg)
-
-        front_right_msg = Float64()
-        front_right_msg.data = front_right
-        self.right_wing_pub.publish(front_right_msg)
-
-        tail_left_msg = Float64()
-        tail_left_msg.data = tail_left
-        self.tail_left_pub.publish(tail_left_msg)
-
-        tail_right_msg = Float64()
-        tail_right_msg.data = tail_right
-        self.tail_right_pub.publish(tail_right_msg)
-
-        thrust_msg = Float64()
-        thrust_msg.data = thrust
-        self.center_thrust_pub.publish(thrust_msg)
+        self.left_wing_pub.publish(Float64(data=front_left))
+        self.right_wing_pub.publish(Float64(data=front_right))
+        self.tail_left_pub.publish(Float64(data=tail_left))
+        self.tail_right_pub.publish(Float64(data=tail_right))
 
 
 def main(args=None) -> None:

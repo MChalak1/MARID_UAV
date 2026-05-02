@@ -372,7 +372,7 @@
       </force_torque>
       <topic>/marid/left_tail/wrench</topic>
     </sensor>
-    <limit lower="-0.25" upper="0.25" effort="500.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
+    <limit lower="-0.35" upper="0.35" effort="500.0" velocity="1.0"/>  <!-- ±20 degrees; servo-like torque limit -->
   </joint>
 
 
@@ -413,7 +413,7 @@
       </force_torque>
       <topic>/marid/right_tail/wrench</topic>
     </sensor>
-    <limit lower="-0.25" upper="0.25" effort="500.0" velocity="1.0"/>  <!-- ±30 degrees; servo-like torque limit -->
+    <limit lower="-0.35" upper="0.35" effort="500.0" velocity="1.0"/>  <!-- ±20 degrees; servo-like torque limit -->
   </joint>
 
 

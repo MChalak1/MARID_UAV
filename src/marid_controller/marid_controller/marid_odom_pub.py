@@ -8,8 +8,8 @@ from rclpy.node import Node
 from rclpy.time import Time
 
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import Imu, Range
-from geometry_msgs.msg import TransformStamped, PoseWithCovarianceStamped, TwistStamped, TwistWithCovarianceStamped
+from sensor_msgs.msg import Imu, Range, JointState, MagneticField
+from geometry_msgs.msg import TransformStamped, PoseWithCovarianceStamped, TwistStamped, TwistWithCovarianceStamped, Vector3Stamped
 from std_msgs.msg import Float64
 from tf2_ros import TransformBroadcaster, Buffer, TransformListener
 
@@ -17,6 +17,385 @@ from std_srvs.srv import Empty
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 
 from tf_transformations import quaternion_matrix
+
+
+class MARIDESKF:
+    """
+    Error-State Kalman Filter for GPS-denied pose estimation on MARID.
+
+    Two propagation modes:
+      "imu"     — IMU-driven prediction, δx ∈ ℝ¹²
+                  Nominal: p(3) v(3) q(4) ba(3)
+      "physics" — Aerodynamic-model prediction, δx ∈ ℝ¹⁴
+                  Nominal: p(3) v(3) q(4) ba(3) kd(1) mh2(1)
+
+    Quaternion convention: [x, y, z, w] matching tf_transformations.
+    Frame: ENU (z-up). IMU input must be specific force (a_sf = a_true + g_body).
+    """
+
+    _CHI2_95 = {1: 3.841, 2: 5.991, 3: 7.815, 6: 12.592}
+
+    def __init__(
+        self,
+        mode: str = "physics",
+        g: float = 9.81,
+        p_pos: float = 1.0,
+        p_vel: float = 1.0,
+        p_att: float = 0.1,
+        p_ba:  float = 0.01,
+        p_kd:  float = 1.0,
+        p_mh2: float = 1.0,
+        q_vel: float = 0.1,
+        q_att: float = 0.01,
+        q_ba:  float = 1e-4,
+        q_kd:  float = 1e-4,
+        q_mh2: float = 1e-4,
+        kd_init:     float = 0.5,
+        mh2_init:    float = 30.0,
+        mass_empty:  float = 160.0,
+        air_density: float = 1.225,
+        sfc:         float = 5.0e-6,  # kg/(N·s) — thrust-specific fuel consumption
+        # Aerodynamic model — values from marid_new_gazebo.xacro AdvancedLiftDrag plugin
+        CL0:           float = 0.15188,
+        CLa:           float = 5.015,
+        alpha_stall:   float = 0.3391428111,
+        CLa_stall:     float = -3.85,
+        wing_area:     float = 2.0,
+        AR:            float = 6.5,
+        eff:           float = 0.97,
+        CL_ctrl_wing:  float = 2.0,   # per wing surface, direction=-1 in xacro
+        CL_ctrl_tail:  float = 0.2,   # per tail surface, direction=+1 in xacro
+        min_aero_speed: float = 5.0,  # m/s below which velocity integration is skipped
+    ):
+        assert mode in ("imu", "physics"), f"Unknown ESKF mode: {mode}"
+        self.mode       = mode
+        self.g_world    = np.array([0.0, 0.0, -g])
+        self.rho        = air_density
+        self.mass_empty = mass_empty
+        self.n          = 12 if mode == "imu" else 14
+        # Aerodynamic constants
+        self.CL0          = CL0
+        self.CLa          = CLa
+        self.alpha_stall  = alpha_stall
+        self.CLa_stall    = CLa_stall
+        self.wing_area    = wing_area
+        self.AR           = AR
+        self.eff          = eff
+        self.CL_ctrl_wing = CL_ctrl_wing
+        self.CL_ctrl_tail = CL_ctrl_tail
+        self.min_aero_speed = min_aero_speed
+        self.sfc = sfc
+
+        self.p  = np.zeros(3)
+        self.v  = np.zeros(3)
+        self.q  = np.array([0.0, 0.0, 0.0, 1.0])  # [x,y,z,w]
+        self.ba = np.zeros(3)
+        self.kd  = kd_init  if mode == "physics" else 0.0
+        self.mh2 = mh2_init if mode == "physics" else 0.0
+
+        p_diag = [p_pos]*3 + [p_vel]*3 + [p_att]*3 + [p_ba]*3
+        q_diag = [0.0]*3   + [q_vel]*3 + [q_att]*3 + [q_ba]*3
+        if mode == "physics":
+            p_diag += [p_kd, p_mh2]
+            q_diag += [q_kd, q_mh2]
+        self.P  = np.diag(p_diag).astype(float)
+        self.Qc = np.diag(q_diag).astype(float)
+
+    # ------------------------------------------------------------------
+    # Math helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _dcm(q):
+        """[x,y,z,w] → 3×3 body-to-world DCM."""
+        x, y, z, w = q
+        return np.array([
+            [1-2*(y*y+z*z),   2*(x*y-w*z),   2*(x*z+w*y)],
+            [  2*(x*y+w*z), 1-2*(x*x+z*z),   2*(y*z-w*x)],
+            [  2*(x*z-w*y),   2*(y*z+w*x), 1-2*(x*x+y*y)],
+        ])
+
+    @staticmethod
+    def _skew(v):
+        return np.array([
+            [ 0.0, -v[2],  v[1]],
+            [ v[2],  0.0, -v[0]],
+            [-v[1],  v[0],  0.0],
+        ])
+
+    @staticmethod
+    def _qnorm(q):
+        n = np.linalg.norm(q)
+        return q / n if n > 1e-9 else np.array([0.0, 0.0, 0.0, 1.0])
+
+    @staticmethod
+    def _boxplus(q, dtheta):
+        """q ⊗ exp(dtheta/2): inject attitude error δθ into quaternion."""
+        angle = np.linalg.norm(dtheta)
+        if angle < 1e-10:
+            dq = np.array([0.0, 0.0, 0.0, 1.0])
+        else:
+            s  = math.sin(angle * 0.5) / angle
+            dq = np.array([dtheta[0]*s, dtheta[1]*s, dtheta[2]*s,
+                           math.cos(angle * 0.5)])
+        qx, qy, qz, qw = q
+        dx, dy, dz, dw = dq
+        return np.array([
+            qw*dx + qx*dw + qy*dz - qz*dy,
+            qw*dy - qx*dz + qy*dw + qz*dx,
+            qw*dz + qx*dy - qy*dx + qz*dw,
+            qw*dw - qx*dx - qy*dy - qz*dz,
+        ])
+
+    # ------------------------------------------------------------------
+    # Prediction
+    # ------------------------------------------------------------------
+
+    def predict_imu(self, a_sf: np.ndarray, omega: np.ndarray, dt: float):
+        """Propagate attitude from gyro; dead-reckon position from current velocity.
+
+        Acceleration is intentionally not integrated into velocity. The specific-force
+        convention across the Gazebo→imu_add_gravity→Madgwick pipeline is uncertain
+        (gravity may be double-counted depending on sim config). Velocity is owned
+        entirely by measurement updates (airspeed, OF, FAST-LIO, wheel odom), which
+        bound drift to a single sensor update interval.
+        """
+        if not (0.0 < dt < 0.5):
+            return
+        self.p = self.p + self.v * dt
+        self.q = self._qnorm(self._boxplus(self.q, omega * dt))
+
+        n = self.n
+        F = np.zeros((n, n))
+        F[0:3, 3:6] = np.eye(3)           # δṗ/δv
+        F[6:9, 6:9] = -self._skew(omega)  # δθ̇/δθ
+
+        Phi = np.eye(n) + F * dt
+        self.P = Phi @ self.P @ Phi.T + self.Qc * dt
+
+    def predict_physics(
+        self, thrust_N: float, omega: np.ndarray,
+        delta_lw: float, delta_rw: float, delta_tl: float, delta_tr: float,
+        dt: float,
+    ):
+        """Propagate using full aerodynamic model (thrust + lift + drag + gravity).
+
+        Lift model matches marid_new_gazebo.xacro AdvancedLiftDrag plugin.
+        Velocity integration is enabled only above min_aero_speed; below that
+        (ground, slow flight) position dead-reckons from current velocity estimate.
+        """
+        if self.mode != "physics" or not (0.0 < dt < 0.5):
+            return
+
+        C  = self._dcm(self.q)
+        c1 = C[:, 0]   # body-forward in world frame
+        c3 = C[:, 2]   # body-up in world frame
+        m  = max(self.mass_empty + self.mh2, 1.0)
+        speed = max(np.linalg.norm(self.v), 1e-6)
+        q_dyn = 0.5 * self.rho * speed * speed
+
+        # Angle of attack in body xz-plane (body forward=x, up=z per xacro convention)
+        v_body  = C.T @ self.v
+        alpha   = math.atan2(-v_body[2], max(abs(v_body[0]), 1e-6)) * math.copysign(1.0, v_body[0] + 1e-9)
+        alpha   = max(-0.5, min(0.5, alpha))
+
+        # CL: pre-stall / post-stall (matching AdvancedLiftDrag logic)
+        if abs(alpha) < self.alpha_stall:
+            CL_alpha = self.CL0 + self.CLa * alpha
+        else:
+            s = math.copysign(1.0, alpha)
+            CL_alpha = (self.CL0 + self.CLa * self.alpha_stall * s
+                        + self.CLa_stall * (abs(alpha) - self.alpha_stall) * s)
+
+        # Control surface contributions (xacro direction: -1 for wings, +1 for tails)
+        CL_surf = (-self.CL_ctrl_wing * delta_lw
+                   - self.CL_ctrl_wing * delta_rw
+                   + self.CL_ctrl_tail * delta_tl
+                   + self.CL_ctrl_tail * delta_tr)
+        CL_total = CL_alpha + CL_surf
+
+        # Lift direction: c3 projected perpendicular to velocity (standard aero convention)
+        v_hat    = self.v / speed
+        lift_dir = c3 - np.dot(c3, v_hat) * v_hat
+        ld_norm  = np.linalg.norm(lift_dir)
+        lift_dir = lift_dir / ld_norm if ld_norm > 1e-6 else c3.copy()
+
+        L = q_dyn * self.wing_area * CL_total
+        F_lift = L * lift_dir
+
+        # Drag: k_d augmented state (quadratic, opposes velocity)
+        F_drag = -self.kd * self.rho * speed * self.v
+
+        a_world = (thrust_N / m) * c1 + F_lift / m + F_drag / m + self.g_world
+
+        # Propagate attitude always.
+        # Horizontal (vx, vy) integrated from physics above min_aero_speed.
+        # Vertical (vz) always dead-reckons: altitude is the best-observed state
+        # (sonar + baro) and lift-model inaccuracies during climb cause z drift.
+        self.q = self._qnorm(self._boxplus(self.q, omega * dt))
+        if speed >= self.min_aero_speed:
+            self.p[:2] += self.v[:2] * dt + 0.5 * a_world[:2] * (dt * dt)
+            self.v[:2] += a_world[:2] * dt
+        else:
+            self.p[:2] += self.v[:2] * dt   # dead-reckon horizontal at low speed
+        self.p[2] += self.v[2] * dt         # z always dead-reckons from sensor-corrected vz
+
+        # Burn hydrogen: m_h2 ← m_h2 − SFC·T·Δt  (doc §3.2)
+        self.mh2 = max(0.0, self.mh2 - self.sfc * thrust_N * dt)
+
+        # F matrix — aerodynamic cross-terms enable k_d/m_h2 observability.
+        # Row 5 (vz dot) is zeroed: vz is not integrated from physics (always
+        # sensor-driven), so coupling its covariance to physics would be wrong.
+        F = np.zeros((14, 14))
+        F[0:3, 3:6]   = np.eye(3)
+        # Physics-driven velocity linearisation applies only to vx, vy (rows 3,4)
+        _drag_jac = -(self.kd * self.rho / m) * (
+            speed * np.eye(3) + np.outer(self.v, self.v) / speed)
+        _att_jac  = (thrust_N / m) * self._skew(c1) + (L / m) * self._skew(lift_dir)
+        _kd_jac   = (-(self.rho * speed * self.v) / m).reshape(3, 1)
+        _mh2_jac  = (-a_world / m).reshape(3, 1)
+        F[3:5, 3:6]   = _drag_jac[0:2, :]   # vx, vy drag coupling
+        F[3:5, 6:9]   = _att_jac[0:2, :]    # vx, vy attitude coupling
+        F[3:5, 12:13] = _kd_jac[0:2]        # vx, vy vs kd
+        F[3:5, 13:14] = _mh2_jac[0:2]       # vx, vy vs mh2
+        # row 5 (vz) left zero — vz is sensor-driven, not physics-integrated
+        F[6:9, 6:9]   = -self._skew(omega)
+
+        Phi = np.eye(14) + F * dt
+        self.P = Phi @ self.P @ Phi.T + self.Qc * dt
+
+    # ------------------------------------------------------------------
+    # Measurement update
+    # ------------------------------------------------------------------
+
+    def _update(self, z: np.ndarray, H: np.ndarray,
+                R_noise: np.ndarray, gate_chi2=None) -> bool:
+        """EKF update with optional Mahalanobis gate. Returns True if applied."""
+        S = H @ self.P @ H.T + R_noise
+        if gate_chi2 is not None:
+            try:
+                d2 = float(z @ np.linalg.solve(S, z))
+                if d2 > gate_chi2:
+                    return False
+            except np.linalg.LinAlgError:
+                return False
+        try:
+            K = self.P @ H.T @ np.linalg.inv(S)
+        except np.linalg.LinAlgError:
+            return False
+
+        dx = K @ z
+        self.p  = self.p  + dx[0:3]
+        self.v  = self.v  + dx[3:6]
+        self.q  = self._qnorm(self._boxplus(self.q, dx[6:9]))
+        self.ba = self.ba + dx[9:12]
+        if self.mode == "physics":
+            self.kd  = max(0.0, self.kd  + float(dx[12]))
+            self.mh2 = max(0.0, self.mh2 + float(dx[13]))
+
+        I_KH = np.eye(self.n) - K @ H
+        self.P = I_KH @ self.P @ I_KH.T + K @ R_noise @ K.T
+        return True
+
+    # Convenience update methods — H is constructed from geometry, not hardcoded
+
+    def update_position(self, p_meas: np.ndarray, r_pos: float = 0.1, gate: bool = True):
+        H = np.zeros((3, self.n)); H[0:3, 0:3] = np.eye(3)
+        self._update(p_meas - self.p, H, np.eye(3) * r_pos,
+                     self._CHI2_95[3] if gate else None)
+
+    def update_altitude(self, z_meas: float, r_alt: float = 0.05, gate: bool = True):
+        H = np.zeros((1, self.n)); H[0, 2] = 1.0
+        self._update(np.array([z_meas - self.p[2]]), H, np.array([[r_alt]]),
+                     self._CHI2_95[1] if gate else None)
+
+    def update_body_velocity_1d(self, v_body_meas: float, axis: int,
+                                r_vel: float = 0.5, gate: bool = True):
+        """Update from a scalar body-frame velocity (e.g. airspeed along body-x).
+
+        H = [0(3) | ci^T | (ê_i × v_b)^T | 0(3) | 0 | 0]  (doc §6.1, §6.5)
+        The δθ block couples attitude error to the predicted body-axis velocity.
+        """
+        C   = self._dcm(self.q)
+        ci  = C[:, axis]                     # body axis i in world frame
+        v_b = C.T @ self.v                   # velocity in body frame
+        # ê_i × v_b for each axis:
+        #   axis=0: [0, -v_bz,  v_by]
+        #   axis=1: [v_bz,  0, -v_bx]
+        #   axis=2: [-v_by, v_bx,  0]
+        _ei_cross_vb = np.array([
+            [0.0,     -v_b[2],  v_b[1]],
+            [v_b[2],   0.0,    -v_b[0]],
+            [-v_b[1],  v_b[0],  0.0   ],
+        ])[axis]
+        H  = np.zeros((1, self.n))
+        H[0, 3:6] = ci
+        H[0, 6:9] = _ei_cross_vb
+        innov = np.array([v_body_meas - float(ci @ self.v)])
+        self._update(innov, H, np.array([[r_vel]]),
+                     self._CHI2_95[1] if gate else None)
+
+    def update_body_velocity_2d(self, vx_body: float, vy_body: float,
+                                r_vel: float = 0.5, gate: bool = True):
+        """Update from 2D body-frame velocity (e.g. optical flow vx, vy).
+
+        H rows follow §6.1 general pattern:
+          row 0 (ê_1): [0(3) | c1^T | (ê_1 × v_b)^T | 0(3) | 0 | 0]
+          row 1 (ê_2): [0(3) | c2^T | (ê_2 × v_b)^T | 0(3) | 0 | 0]
+        """
+        C   = self._dcm(self.q)
+        c1  = C[:, 0]; c2 = C[:, 1]
+        v_b = C.T @ self.v
+        H   = np.zeros((2, self.n))
+        H[0, 3:6] = c1
+        H[1, 3:6] = c2
+        H[0, 6:9] = np.array([0.0,     -v_b[2],  v_b[1]])  # ê_1 × v_b
+        H[1, 6:9] = np.array([v_b[2],   0.0,    -v_b[0]])  # ê_2 × v_b
+        innov = np.array([vx_body - v_b[0], vy_body - v_b[1]])
+        self._update(innov, H, np.eye(2) * r_vel,
+                     self._CHI2_95[2] if gate else None)
+
+    def update_heading(self, yaw_meas: float, r_yaw: float = 0.05, gate: bool = True):
+        """Update from yaw measurement. H = [0,0,1] in δθ block (near-level approx)."""
+        x, y, z, w = self.q
+        yaw_est = math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
+        dy = yaw_meas - yaw_est
+        dy = (dy + math.pi) % (2 * math.pi) - math.pi
+        H  = np.zeros((1, self.n)); H[0, 8] = 1.0
+        self._update(np.array([dy]), H, np.array([[r_yaw]]),
+                     self._CHI2_95[1] if gate else None)
+
+    def update_orientation(self, q_meas: np.ndarray, r_ori: float = 0.01,
+                           gate: bool = True):
+        """Update from a full quaternion (Madgwick output).  H = I_3 in δθ block (doc §6.11).
+
+        Innovation: ν = 2 · vec(q̂⁻¹ ⊗ q_meas)
+        Corrects all three δθ components simultaneously, not just yaw.
+        q convention: [x, y, z, w] throughout.
+        """
+        qx, qy, qz, qw = self.q
+        mx, my, mz, mw = q_meas
+        # q̂⁻¹ = [−qx, −qy, −qz, qw] for a unit quaternion.
+        # δq = q̂⁻¹ ⊗ q_meas  (Hamilton product, [x,y,z,w] convention):
+        dx = qw*mx - qx*mw - qy*mz + qz*my
+        dy = qw*my + qx*mz - qy*mw - qz*mx
+        dz = qw*mz - qx*my + qy*mx - qz*mw
+        nu = np.array([2.0*dx, 2.0*dy, 2.0*dz])
+        H  = np.zeros((3, self.n))
+        H[0:3, 6:9] = np.eye(3)
+        self._update(nu, H, np.eye(3) * r_ori,
+                     self._CHI2_95[3] if gate else None)
+
+    # ------------------------------------------------------------------
+    # Accessors
+    # ------------------------------------------------------------------
+
+    @property
+    def position(self):   return self.p.copy()
+    @property
+    def velocity(self):   return self.v.copy()
+    @property
+    def quaternion(self): return self.q.copy()
 
 
 class MaridOdomPublisher(Node):
@@ -158,6 +537,40 @@ class MaridOdomPublisher(Node):
         # How strongly tank sensor reading corrects the integrated estimate (0=ignore, 1=hard reset).
         self.declare_parameter("tank_sensor_weight", 0.01)
 
+        # ESKF
+        self.declare_parameter("use_eskf", True)
+        self.declare_parameter("eskf_mode", "physics")     # "imu" or "physics"
+        self.declare_parameter("eskf_r_pos",      0.1)     # FAST-LIO position noise (m²)
+        self.declare_parameter("eskf_r_vel",      0.5)     # velocity sensor noise (m²/s²)
+        self.declare_parameter("eskf_r_alt_sonar", 0.02)   # sonar altitude noise (m²)
+        self.declare_parameter("eskf_r_alt_baro",  0.5)    # baro altitude noise (m²)
+        self.declare_parameter("eskf_r_yaw",      0.05)    # heading noise (rad²)
+        self.declare_parameter("eskf_q_vel",      0.1)     # process noise — velocity
+        self.declare_parameter("eskf_q_att",      0.01)    # process noise — attitude
+        self.declare_parameter("eskf_q_ba",       1e-4)    # process noise — accel bias
+        self.declare_parameter("eskf_r_ori",      0.01)    # Madgwick orientation noise (rad²)
+
+        # Magnetometer fusion
+        self.declare_parameter("use_magnetometer",      True)
+        self.declare_parameter("mag_topic",             "/magnetometer")
+        self.declare_parameter("eskf_r_yaw_mag",        0.04)   # rad² — ~11° 1-sigma (conservative)
+        self.declare_parameter("mag_field_min_ut",      20.0)   # µT — below → interference
+        self.declare_parameter("mag_field_max_ut",      70.0)   # µT — above → interference
+        self.declare_parameter("mag_declination_rad",   0.2298) # 13.2° E at SF Bay (true−mag north)
+        self.declare_parameter("mag_hard_iron",         [0.0, 0.0, 0.0])       # T offsets
+        self.declare_parameter("mag_soft_iron_diag",    [1.0, 1.0, 1.0])       # scale factors
+        self.declare_parameter("mag_timeout",           0.2)    # seconds
+
+        # Sun sensor fusion
+        self.declare_parameter("use_sun_sensor",            True)
+        self.declare_parameter("sun_sensor_topic",          "/sun_sensor/sun_vector_body")
+        self.declare_parameter("sun_azimuth_topic",         "/sun_sensor/sun_azimuth_enu_rad")
+        self.declare_parameter("sun_elevation_topic",       "/sun_sensor/sun_elevation_deg")
+        self.declare_parameter("eskf_r_yaw_sun",            0.002)  # rad² — ~2.6° 1-sigma
+        self.declare_parameter("sun_elevation_min_deg",     10.0)   # gate — below → invalid
+        self.declare_parameter("sun_sensor_timeout",        1.0)    # seconds
+        self.declare_parameter("sun_yaw_weight",            0.3)    # non-ESKF blend weight
+
         # -----------------------
         # Get parameters
         # -----------------------
@@ -246,12 +659,69 @@ class MaridOdomPublisher(Node):
         self.tank_sensor_w_    = float(self.get_parameter("tank_sensor_weight").value)
         self.R_H2_             = 8314.0 / 2.016   # J/(kg·K) specific gas constant for H₂
 
+        self.use_eskf_          = bool(self.get_parameter("use_eskf").value)
+        self.eskf_mode_         = str(self.get_parameter("eskf_mode").value)
+        self.eskf_r_pos_        = float(self.get_parameter("eskf_r_pos").value)
+        self.eskf_r_vel_        = float(self.get_parameter("eskf_r_vel").value)
+        self.eskf_r_alt_sonar_  = float(self.get_parameter("eskf_r_alt_sonar").value)
+        self.eskf_r_alt_baro_   = float(self.get_parameter("eskf_r_alt_baro").value)
+        self.eskf_r_yaw_        = float(self.get_parameter("eskf_r_yaw").value)
+        self.eskf_r_ori_        = float(self.get_parameter("eskf_r_ori").value)
+
+        # Magnetometer
+        self.use_magnetometer_  = bool(self.get_parameter("use_magnetometer").value)
+        self.mag_topic_         = str(self.get_parameter("mag_topic").value)
+        self.eskf_r_yaw_mag_    = float(self.get_parameter("eskf_r_yaw_mag").value)
+        self.mag_field_min_ut_  = float(self.get_parameter("mag_field_min_ut").value)
+        self.mag_field_max_ut_  = float(self.get_parameter("mag_field_max_ut").value)
+        self.mag_decl_          = float(self.get_parameter("mag_declination_rad").value)
+        _hi = self.get_parameter("mag_hard_iron").value
+        self.mag_hard_iron_     = [float(_hi[0]), float(_hi[1]), float(_hi[2])]
+        _sd = self.get_parameter("mag_soft_iron_diag").value
+        self.mag_soft_iron_     = [float(_sd[0]), float(_sd[1]), float(_sd[2])]
+        self.mag_timeout_       = float(self.get_parameter("mag_timeout").value)
+
+        # Sun sensor
+        self.use_sun_sensor_       = bool(self.get_parameter("use_sun_sensor").value)
+        self.sun_sensor_topic_     = str(self.get_parameter("sun_sensor_topic").value)
+        self.sun_azimuth_topic_    = str(self.get_parameter("sun_azimuth_topic").value)
+        self.sun_elevation_topic_  = str(self.get_parameter("sun_elevation_topic").value)
+        self.eskf_r_yaw_sun_       = float(self.get_parameter("eskf_r_yaw_sun").value)
+        self.sun_el_min_deg_       = float(self.get_parameter("sun_elevation_min_deg").value)
+        self.sun_sensor_timeout_   = float(self.get_parameter("sun_sensor_timeout").value)
+        self.sun_yaw_weight_       = float(self.get_parameter("sun_yaw_weight").value)
+
         # -----------------------
         # TF broadcaster + listener
         # -----------------------
         self.tf_broadcaster_ = TransformBroadcaster(self)
         self.tf_buffer_ = Buffer()
         self.tf_listener_ = TransformListener(self.tf_buffer_, self)
+
+        # -----------------------
+        # ESKF
+        # -----------------------
+        self.eskf_seeded_    = False
+        self.eskf_imu_stamp_ = None
+        # Surface angles for physics-mode predict (radians, from joint states)
+        self.delta_lw_ = 0.0
+        self.delta_rw_ = 0.0
+        self.delta_tl_ = 0.0
+        self.delta_tr_ = 0.0
+        self.eskf_ = (
+            MARIDESKF(
+                mode=self.eskf_mode_,
+                g=self.g_,
+                q_vel=float(self.get_parameter("eskf_q_vel").value),
+                q_att=float(self.get_parameter("eskf_q_att").value),
+                q_ba =float(self.get_parameter("eskf_q_ba").value),
+                kd_init    =self.drag_coeff_,
+                mh2_init   =self.h2_initial_mass_,
+                mass_empty =self.drone_empty_mass_,
+                air_density=self.air_density_,
+                sfc        =self.sfc_,
+            ) if self.use_eskf_ else None
+        )
 
         # -----------------------
         # State variables
@@ -335,10 +805,14 @@ class MaridOdomPublisher(Node):
 
         # Debounce counter for on-ground detection used in vx source switching.
         # A single noisy sonar reading below ground_threshold_ must not snap vx to 0.
-        # Physical location and wheel-odom position use raw _on_ground() for fast response;
-        # only the vx source decision is debounced.
+        # Physical location and wheel-odom position use raw _on_ground() for fast response;                        
+        # only the vx source decision is debounced.    
         self.on_ground_ticks_ = 0
         self.on_ground_debounce_ticks_ = 3   # ~60 ms at 50 Hz
+        # Debounced ground flag: True only after 3 consecutive ground readings.
+        # Starts False so wheel_odom cannot anchor ESKF until sonar confirms ground,
+        # preventing Gazebo physics-settling from writing a bad initial position.
+        self.on_ground_debounced_ = False
 
         # Wheel odometry fusion state
         self.wheel_odom_ready_ = False
@@ -356,6 +830,26 @@ class MaridOdomPublisher(Node):
         self.last_thrust_stamp_ = None
         self.prev_on_ground_    = True  # tracks ground→air transition for liftoff seed
         self.liftoff_seeded_    = False  # one-shot: prevents re-seeding on sonar flicker
+        self.ground_yaw_        = 0.0   # held heading for ground yaw-only attitude
+
+        # Magnetometer state
+        self.mag_field_body_    = None   # [bx, by, bz] calibrated (Tesla)
+        self.mag_ready_         = False
+        self.last_mag_stamp_    = None
+        self.mag_valid_         = False  # True when field magnitude in expected range
+        self.mag_yaw_           = 0.0   # last tilt-compensated heading (rad)
+
+        # Sun sensor state
+        self.sun_vector_body_   = None   # [sx, sy, sz] unit vector body frame
+        self.sun_azimuth_enu_   = 0.0   # sun azimuth from East CCW (rad)
+        self.sun_elevation_deg_ = -90.0
+        self.sun_ready_         = False
+        self.last_sun_stamp_    = None
+        self.sun_valid_         = False  # True when elevation above threshold
+        self.sun_yaw_           = 0.0   # last computed heading from sun (rad)
+
+        # One-shot flag: initial heading seed from mag at startup
+        self.mag_heading_seeded_ = False
 
         # Last published velocities — used as hold/decay fallback so a single bad sensor
         # tick doesn't snap vx_pub to 0 (self.vx_ is always 0 when FAST-LIO is off).
@@ -381,6 +875,21 @@ class MaridOdomPublisher(Node):
         self.pose_sub_ = self.create_subscription(
             Imu, "/imu_ekf", self.imu_callback, 10
         )
+
+        if self.eskf_ is not None:
+            # /imu/with_gravity carries gravity-added specific force (before Madgwick).
+            # Madgwick may zero linear_acceleration in its output, so we cannot use
+            # /imu_ekf for ESKF prediction — subscribe to the pre-filter topic instead.
+            self.eskf_imu_sub_ = self.create_subscription(
+                Imu, "/imu/with_gravity", self.eskf_raw_imu_callback, 10
+            )
+            if self.eskf_mode_ == "physics":
+                self.joint_state_sub_ = self.create_subscription(
+                    JointState,
+                    "/world/empty/model/marid/joint_state",
+                    self.joint_state_callback,
+                    10,
+                )
 
         if self.use_barometer_:
             self.baro_sub_ = self.create_subscription(
@@ -436,6 +945,22 @@ class MaridOdomPublisher(Node):
             )
             self.tank_t_sub_ = self.create_subscription(
                 Float64, tank_t_topic, self.tank_temperature_callback, 10
+            )
+
+        if self.use_magnetometer_:
+            self.mag_sub_ = self.create_subscription(
+                MagneticField, self.mag_topic_, self.mag_callback, 10
+            )
+
+        if self.use_sun_sensor_:
+            self.sun_vec_sub_ = self.create_subscription(
+                Vector3Stamped, self.sun_sensor_topic_, self.sun_vector_callback, 10
+            )
+            self.sun_az_sub_ = self.create_subscription(
+                Float64, self.sun_azimuth_topic_, self.sun_azimuth_callback, 10
+            )
+            self.sun_el_sub_ = self.create_subscription(
+                Float64, self.sun_elevation_topic_, self.sun_elevation_callback, 10
             )
 
         self.odom_pub_ = self.create_publisher(Odometry, "/marid/odom", 10)
@@ -554,8 +1079,9 @@ class MaridOdomPublisher(Node):
             return
         self.baro_z_ = float(z)
         self.baro_ready_ = True
-        # Recompute fused Z whenever baro updates
         self._update_z_fused()
+        if self.eskf_ is not None and self.eskf_seeded_:
+            self.eskf_.update_altitude(float(z), self.eskf_r_alt_baro_)
 
     def fastlio_callback(self, msg: Odometry):
         pos = msg.pose.pose.position
@@ -671,32 +1197,46 @@ class MaridOdomPublisher(Node):
         self.z_imu_ = z_odom
         self._update_z_fused()
 
+        # Rotate FAST-LIO orientation from camera_init into odom frame.
+        # Positions are already rotated via R_tf; orientation must match.
+        # q_odom = q_tf ⊗ q_fl  ([x,y,z,w] quaternion product)
+        ori_valid = (self._is_finite(ori.x) and self._is_finite(ori.y)
+                     and self._is_finite(ori.z) and self._is_finite(ori.w))
+        if ori_valid:
+            tx, ty, tz, tw = tf_q[0], tf_q[1], tf_q[2], tf_q[3]
+            fx, fy, fz, fw = ori.x, ori.y, ori.z, ori.w
+            fl_q_w = tw*fw - tx*fx - ty*fy - tz*fz
+            fl_q_x = tw*fx + tx*fw + ty*fz - tz*fy
+            fl_q_y = tw*fy - tx*fz + ty*fw + tz*fx
+            fl_q_z = tw*fz + tx*fy - ty*fx + tz*fw
+            fl_yaw_odom = math.atan2(
+                2.0 * (fl_q_w * fl_q_z + fl_q_x * fl_q_y),
+                1.0 - 2.0 * (fl_q_y * fl_q_y + fl_q_z * fl_q_z),
+            )
+        else:
+            fl_yaw_odom = None
+
         # Blend FAST-LIO yaw into current heading when scan-matching is reliable.
-        # Skip on the very first message (fastlio_ready_ still False): FAST-LIO orientation
-        # is also unreliable before the first scan-match completes and injecting a bad yaw
-        # would corrupt the rotation matrix used by the IMU integration loop.
+        # Skipped on the ground: flat surfaces give LiDAR almost no features to
+        # constrain heading, so FAST-LIO yaw can jump 90°+ as scan matching
+        # tries to converge. The on-ground yaw-only clamp in publish_odom would
+        # then freeze that wrong heading. Madgwick gyro-integrated yaw is more
+        # stable during ground runs.
+        # Also skipped on the very first message (fastlio_ready_ still False).
         if (self.fastlio_ready_
                 and self.fastlio_yaw_weight_ > 0.0
-                and self._is_finite(ori.x) and self._is_finite(ori.y)
-                and self._is_finite(ori.z) and self._is_finite(ori.w)):
-            # Extract yaw from FAST-LIO quaternion
-            fl_yaw = math.atan2(
-                2.0 * (ori.w * ori.z + ori.x * ori.y),
-                1.0 - 2.0 * (ori.y * ori.y + ori.z * ori.z)
-            )
-            # Extract current yaw from IMU quaternion
+                and not self._on_ground()
+                and fl_yaw_odom is not None):
             imu_yaw = math.atan2(
                 2.0 * (self.qw_ * self.qz_ + self.qx_ * self.qy_),
                 1.0 - 2.0 * (self.qy_ * self.qy_ + self.qz_ * self.qz_)
             )
-            # Interpolate yaw (handle wrap-around)
-            dyaw = fl_yaw - imu_yaw
+            dyaw = fl_yaw_odom - imu_yaw
             if dyaw > math.pi:
                 dyaw -= 2.0 * math.pi
             elif dyaw < -math.pi:
                 dyaw += 2.0 * math.pi
             blended_yaw = imu_yaw + self.fastlio_yaw_weight_ * dyaw
-            # Extract roll/pitch from current IMU quaternion, rebuild with blended yaw
             sinr_cosp = 2.0 * (self.qw_ * self.qx_ + self.qy_ * self.qz_)
             cosr_cosp = 1.0 - 2.0 * (self.qx_ * self.qx_ + self.qy_ * self.qy_)
             imu_roll = math.atan2(sinr_cosp, cosr_cosp)
@@ -713,12 +1253,26 @@ class MaridOdomPublisher(Node):
 
         self.fastlio_ready_ = True
 
+        if self.eskf_ is not None and self.eskf_seeded_:
+            z_gate = self.eskf_.p[2] if self.eskf_seeded_ else self.z_fused_
+            if z_gate <= self.max_fastlio_alt_:
+                self.eskf_.update_position(
+                    np.array([x_odom, y_odom, z_odom]), self.eskf_r_pos_
+                )
+            if not self._on_ground() and fl_yaw_odom is not None:
+                self.eskf_.update_heading(fl_yaw_odom, self.eskf_r_yaw_)
+
     def airspeed_callback(self, msg: Float64):
         val = float(msg.data)
         if math.isfinite(val) and val >= 0.0:
             self.last_airspeed_ = val
             self.airspeed_ready_ = True
             self.last_airspeed_stamp_ = self.get_clock().now()
+            if (self.eskf_ is not None and self.eskf_seeded_
+                    and val >= self.min_airspeed_):
+                # Airspeed = body-frame forward speed; H projects world velocity
+                # onto the body-forward axis: z = c1ᵀ v_world
+                self.eskf_.update_body_velocity_1d(val, axis=0, r_vel=self.eskf_r_vel_)
 
     def of_callback(self, msg: TwistWithCovarianceStamped):
         vx = msg.twist.twist.linear.x
@@ -728,6 +1282,9 @@ class MaridOdomPublisher(Node):
             self.of_vy_body_ = vy
             self.of_ready_   = True
             self.last_of_stamp_ = self.get_clock().now()
+            if (self.eskf_ is not None and self.eskf_seeded_
+                    and self.min_of_altitude_ <= self.z_fused_ <= self.max_of_altitude_):
+                self.eskf_.update_body_velocity_2d(vx, vy, r_vel=self.eskf_r_vel_)
 
     def fwd_cam_callback(self, msg: TwistWithCovarianceStamped):
         vy = msg.twist.twist.linear.y
@@ -737,6 +1294,13 @@ class MaridOdomPublisher(Node):
             self.fwd_cam_vz_body_ = vz
             self.fwd_cam_ready_   = True
             self.last_fwd_cam_stamp_ = self.get_clock().now()
+            if (self.eskf_ is not None and self.eskf_seeded_
+                    and self.z_fused_ >= self.min_fwd_cam_altitude_):
+                # Forward camera observes body-lateral (vy) and body-up (vz) — doc §6.7.
+                # Two sequential 1-D updates reuse the shared H pattern from §6.1 and
+                # let each axis be gated independently via Mahalanobis.
+                self.eskf_.update_body_velocity_1d(vy, axis=1, r_vel=self.eskf_r_vel_)
+                self.eskf_.update_body_velocity_1d(vz, axis=2, r_vel=self.eskf_r_vel_)
 
     def sonar_callback(self, msg: Range):
         r = float(msg.range)
@@ -745,8 +1309,9 @@ class MaridOdomPublisher(Node):
             self.sonar_ready_ = True
             self.last_sonar_stamp_ = self.get_clock().now()
             self._update_z_fused()
+            if self.eskf_ is not None and self.eskf_seeded_:
+                self.eskf_.update_altitude(r, self.eskf_r_alt_sonar_)
         # Don't clear sonar_ready_ on a bad packet — use timeout in _on_ground() instead.
-        # A single out-of-range reading caused intermittent drops to vx=0 on the ground.
 
     def _on_ground(self) -> bool:
         """True when a recent valid sonar reading confirms AGL <= ground_threshold."""
@@ -767,9 +1332,19 @@ class MaridOdomPublisher(Node):
         self.wheel_y_    = y
         self.wheel_vfwd_ = v
         self.wheel_odom_ready_ = True
-        if self._on_ground():
+        if self.on_ground_debounced_:
             self.x_ = x
             self.y_ = y
+            if self.eskf_ is not None and self.eskf_seeded_:
+                # Position: XY from wheels, keep ESKF altitude for Z.
+                # Debounced flag prevents a sonar flicker at liftoff from snapping
+                # ESKF position back to the last ground position.
+                self.eskf_.update_position(
+                    np.array([float(x), float(y), self.eskf_.p[2]]),
+                    self.eskf_r_pos_,
+                )
+                self.eskf_.update_body_velocity_1d(float(v), axis=0,
+                                                   r_vel=self.eskf_r_vel_)
 
     def wind_callback(self, msg: TwistStamped):
         wx = msg.twist.linear.x
@@ -796,6 +1371,125 @@ class MaridOdomPublisher(Node):
         if math.isfinite(val) and val > 0.0:
             self.tank_temperature_ = val
 
+    # -----------------------
+    # Heading sensors: magnetometer and sun sensor
+    # -----------------------
+
+    def _tilt_compensate(self, vx: float, vy: float, vz: float):
+        """Project a body-frame vector onto the horizontal plane accounting for roll/pitch.
+
+        Returns (bh_x, bh_y): forward and left horizontal components.
+        Derivation: B_level = R_y(pitch) @ R_x(roll) @ B_body; take [0] and [1].
+        """
+        qx, qy, qz, qw = self.qx_, self.qy_, self.qz_, self.qw_
+        roll  = math.atan2(2.0*(qw*qx + qy*qz), 1.0 - 2.0*(qx*qx + qy*qy))
+        pitch = math.asin(max(-1.0, min(1.0, 2.0*(qw*qy - qz*qx))))
+        cr, sr = math.cos(roll), math.sin(roll)
+        cp, sp = math.cos(pitch), math.sin(pitch)
+        bh_x = vx*cp + (vy*sr + vz*cr)*sp   # forward (East at yaw=0)
+        bh_y = vy*cr - vz*sr                  # left (North at yaw=0)
+        return bh_x, bh_y
+
+    def _blend_yaw(self, target_yaw: float, weight: float):
+        """Blend target_yaw into current attitude at the given weight.
+
+        Only adjusts yaw; roll and pitch are preserved from the current quaternion.
+        """
+        imu_yaw = math.atan2(
+            2.0*(self.qw_*self.qz_ + self.qx_*self.qy_),
+            1.0 - 2.0*(self.qy_*self.qy_ + self.qz_*self.qz_)
+        )
+        dyaw = target_yaw - imu_yaw
+        if dyaw > math.pi:    dyaw -= 2.0*math.pi
+        elif dyaw < -math.pi: dyaw += 2.0*math.pi
+        blended_yaw = imu_yaw + weight * dyaw
+        sinr = 2.0*(self.qw_*self.qx_ + self.qy_*self.qz_)
+        cosr = 1.0 - 2.0*(self.qx_*self.qx_ + self.qy_*self.qy_)
+        roll  = math.atan2(sinr, cosr)
+        pitch = math.asin(max(-1.0, min(1.0, 2.0*(self.qw_*self.qy_ - self.qz_*self.qx_))))
+        cr, cp, cy = math.cos(roll/2), math.cos(pitch/2), math.cos(blended_yaw/2)
+        sr, sp, sy = math.sin(roll/2), math.sin(pitch/2), math.sin(blended_yaw/2)
+        self.qw_ = cr*cp*cy + sr*sp*sy
+        self.qx_ = sr*cp*cy - cr*sp*sy
+        self.qy_ = cr*sp*cy + sr*cp*sy
+        self.qz_ = cr*cp*sy - sr*sp*cy
+        self.qx_, self.qy_, self.qz_, self.qw_ = self.normalize_quaternion(
+            self.qx_, self.qy_, self.qz_, self.qw_)
+
+    def mag_callback(self, msg: MagneticField):
+        bx_raw = msg.magnetic_field.x
+        by_raw = msg.magnetic_field.y
+        bz_raw = msg.magnetic_field.z
+        if not all(math.isfinite(v) for v in (bx_raw, by_raw, bz_raw)):
+            return
+        # Hard-iron offset + soft-iron diagonal scale (in Tesla)
+        bx = self.mag_soft_iron_[0] * (bx_raw - self.mag_hard_iron_[0])
+        by = self.mag_soft_iron_[1] * (by_raw - self.mag_hard_iron_[1])
+        bz = self.mag_soft_iron_[2] * (bz_raw - self.mag_hard_iron_[2])
+        # Gate on plausible field magnitude (µT range for Earth's field)
+        field_ut = math.sqrt(bx*bx + by*by + bz*bz) * 1e6
+        self.mag_valid_ = self.mag_field_min_ut_ <= field_ut <= self.mag_field_max_ut_
+        if not self.mag_valid_:
+            return
+        self.mag_field_body_ = [bx, by, bz]
+        self.mag_ready_ = True
+        self.last_mag_stamp_ = self.get_clock().now()
+        # Tilt-compensated heading in ROS ENU (x=fwd, y=left, z=up):
+        #   yaw = atan2(bh_x, bh_y) - declination
+        # Because: B_ENU_horiz = R_z(yaw) @ [bh_x, bh_y]  →  yaw+decl = atan2(bh_x, bh_y)
+        bh_x, bh_y = self._tilt_compensate(bx, by, bz)
+        mag_yaw = math.atan2(math.sin(math.atan2(bh_x, bh_y) - self.mag_decl_),
+                              math.cos(math.atan2(bh_x, bh_y) - self.mag_decl_))
+        self.mag_yaw_ = mag_yaw
+        # One-shot: set initial heading before Madgwick/ESKF fully converge.
+        # Uses weight=1.0 (hard set) so the first valid reading establishes a correct heading
+        # rather than waiting for the complementary filter to slowly rotate toward it.
+        if not self.mag_heading_seeded_ and self.integration_count_ > 0:
+            self._blend_yaw(mag_yaw, 1.0)
+            if self.eskf_ is not None and self.eskf_seeded_:
+                self.eskf_.q = np.array([self.qx_, self.qy_, self.qz_, self.qw_])
+            self.mag_heading_seeded_ = True
+            self.get_logger().info(
+                f"Heading seeded from magnetometer: {math.degrees(mag_yaw):.1f}°"
+            )
+        # ESKF heading update (in-flight only — ground motion direction owns heading on ground)
+        if (self.eskf_ is not None and self.eskf_seeded_
+                and not self._on_ground()):
+            self.eskf_.update_heading(mag_yaw, self.eskf_r_yaw_mag_)
+
+    def sun_vector_callback(self, msg: Vector3Stamped):
+        sx, sy, sz = msg.vector.x, msg.vector.y, msg.vector.z
+        if not all(math.isfinite(v) for v in (sx, sy, sz)):
+            return
+        self.sun_vector_body_ = [sx, sy, sz]
+        self.sun_ready_ = True
+        self.last_sun_stamp_ = self.get_clock().now()
+        if not self.sun_valid_:
+            return
+        # Tilt-compensated sun heading in ROS ENU (x=fwd, y=left, z=up):
+        #   yaw = az_sun_enu - atan2(bh_y, bh_x)
+        # Because: az_sun = atan2(N, E) = yaw + atan2(sun_level_y, sun_level_x)
+        bh_x, bh_y = self._tilt_compensate(sx, sy, sz)
+        sun_yaw = self.sun_azimuth_enu_ - math.atan2(bh_y, bh_x)
+        sun_yaw = math.atan2(math.sin(sun_yaw), math.cos(sun_yaw))
+        self.sun_yaw_ = sun_yaw
+        # ESKF heading update — sun sensor is the most accurate heading source in GPS-denied
+        if (self.eskf_ is not None and self.eskf_seeded_
+                and not self._on_ground()):
+            self.eskf_.update_heading(sun_yaw, self.eskf_r_yaw_sun_)
+        elif not self._on_ground():
+            # Non-ESKF path: blend sun heading into complementary filter.
+            # Madgwick handles magnetometer; sun provides additional independent correction.
+            self._blend_yaw(sun_yaw, self.sun_yaw_weight_)
+
+    def sun_azimuth_callback(self, msg: Float64):
+        self.sun_azimuth_enu_ = float(msg.data)
+
+    def sun_elevation_callback(self, msg: Float64):
+        el = float(msg.data)
+        self.sun_elevation_deg_ = el
+        self.sun_valid_ = el >= self.sun_el_min_deg_
+
     def imu_callback(self, msg: Imu):
         # Orientation and angular velocity only — zero integration.
         # Position is owned entirely by fastlio_callback.
@@ -805,6 +1499,62 @@ class MaridOdomPublisher(Node):
         wz = msg.angular_velocity.z
         self.wz_ = wz if self._is_finite(wz) else 0.0
         self.integration_count_ += 1
+
+        # Seed ESKF attitude once from the Madgwick-filtered orientation, then
+        # apply a continuous measurement update (doc §6.11) on every subsequent tick.
+        # predict_imu / predict_physics run in eskf_raw_imu_callback; the orientation
+        # update here corrects δθ using the Madgwick quaternion as a sensor output.
+        if self.eskf_ is not None and not self.eskf_seeded_:
+            self.eskf_.q = np.array([self.qx_, self.qy_, self.qz_, self.qw_])
+            self.eskf_seeded_ = True
+        elif self.eskf_ is not None and self.eskf_seeded_:
+            q_meas = np.array([self.qx_, self.qy_, self.qz_, self.qw_])
+            self.eskf_.update_orientation(q_meas, self.eskf_r_ori_)
+
+    def joint_state_callback(self, msg: JointState):
+        """Extract surface angles for physics-mode ESKF predict."""
+        for i, name in enumerate(msg.name):
+            if name == "left_wing_joint":
+                self.delta_lw_ = float(msg.position[i])
+            elif name == "right_wing_joint":
+                self.delta_rw_ = float(msg.position[i])
+            elif name == "tail_left_joint":
+                self.delta_tl_ = float(msg.position[i])
+            elif name == "tail_right_joint":
+                self.delta_tr_ = float(msg.position[i])
+
+    def eskf_raw_imu_callback(self, msg: Imu):
+        """Drive ESKF prediction from /imu/with_gravity at IMU rate."""
+        if not self.eskf_seeded_:
+            return
+        ox = msg.angular_velocity.x
+        oy = msg.angular_velocity.y
+        oz = msg.angular_velocity.z
+        if not all(math.isfinite(v) for v in (ox, oy, oz)):
+            return
+        now = self.get_clock().now()
+        if self.eskf_imu_stamp_ is not None:
+            dt = (now - self.eskf_imu_stamp_).nanoseconds / 1e9
+            omega = np.array([ox, oy, oz])
+            if self.eskf_mode_ == "physics":
+                self.eskf_.predict_physics(
+                    self.thrust_N_,
+                    omega,
+                    self.delta_lw_,
+                    self.delta_rw_,
+                    self.delta_tl_,
+                    self.delta_tr_,
+                    dt,
+                )
+            else:
+                ax = msg.linear_acceleration.x
+                ay = msg.linear_acceleration.y
+                az = msg.linear_acceleration.z
+                if all(math.isfinite(v) for v in (ax, ay, az)):
+                    self.eskf_.predict_imu(
+                        np.array([ax, ay, az]), omega, dt
+                    )
+        self.eskf_imu_stamp_ = now
 
     # -----------------------
     # Publishing
@@ -878,6 +1628,7 @@ class MaridOdomPublisher(Node):
         else:
             self.on_ground_ticks_ = 0
         on_ground_for_vx = (self.on_ground_ticks_ >= self.on_ground_debounce_ticks_)
+        self.on_ground_debounced_ = on_ground_for_vx
 
         if (self.use_sonar_ and self.prev_on_ground_ and not currently_on_ground
                 and self.use_thrust_dr_ and not self.liftoff_seeded_):
@@ -919,6 +1670,39 @@ class MaridOdomPublisher(Node):
                 self.x_ += v_world[0] * dt_pub
                 self.y_ += v_world[1] * dt_pub
         self.prev_publish_time_ = now
+
+        # ESKF output takes precedence over complementary filter when active.
+        # Altitude (z_fused_, vz_imu_) is intentionally excluded: sonar + baro own
+        # altitude and were accurate before ESKF. ESKF z dead-reckons from vz and
+        # drifts, corrupting the published altitude and making forward motion appear
+        # as altitude gain via the rotated velocity projection.
+        if self.eskf_ is not None and self.eskf_seeded_:
+            ep = self.eskf_.position
+            eq = self.eskf_.quaternion   # [x,y,z,w]
+            self.x_       = float(ep[0])
+            self.y_       = float(ep[1])
+            self.qx_ = float(eq[0]); self.qy_ = float(eq[1])
+            self.qz_ = float(eq[2]); self.qw_ = float(eq[3])
+
+        # On the ground, wheels constrain pitch and roll to zero — only yaw is free.
+        # Madgwick yaw drifts from gyro bias without a magnetometer. Instead, derive
+        # heading from the direction of FAST-LIO world-frame velocity (atan2(vy, vx)):
+        # if FAST-LIO x/y is reliable, so is the motion direction. Hold the last known
+        # heading when the drone is stationary (speed too low for a valid direction).
+        if self._on_ground():
+            ground_speed = math.hypot(self.vx_, self.vy_)
+            if ground_speed > 0.3 and not fastlio_stale:
+                self.ground_yaw_ = math.atan2(self.vy_, self.vx_)
+            cy, sy = math.cos(self.ground_yaw_ / 2), math.sin(self.ground_yaw_ / 2)
+            self.qw_ = cy; self.qx_ = 0.0; self.qy_ = 0.0; self.qz_ = sy
+            self.qx_, self.qy_, self.qz_, self.qw_ = self.normalize_quaternion(
+                self.qx_, self.qy_, self.qz_, self.qw_)
+            # Keep ESKF attitude in sync with the ground clamp so it doesn't diverge
+            # from gyro propagation during the taxi run. Without this, the ESKF
+            # quaternion accumulates pitch/roll error that is released the instant
+            # _on_ground() goes False at liftoff, causing total attitude divergence.
+            if self.eskf_ is not None and self.eskf_seeded_:
+                self.eskf_.q = np.array([self.qx_, self.qy_, self.qz_, self.qw_])
 
         # Validate state
         vals = [self.x_, self.y_, self.z_fused_, self.vx_, self.vy_, self.vz_imu_,
@@ -1048,6 +1832,14 @@ class MaridOdomPublisher(Node):
         self.last_vx_pub_ = vx_pub
         self.last_vy_pub_ = vy_pub
 
+        # ESKF velocity takes precedence over complementary filter
+        if self.eskf_ is not None and self.eskf_seeded_:
+            _ev = self.eskf_.velocity
+            vx_pub = float(_ev[0])
+            vy_pub = float(_ev[1])
+            self.last_vx_pub_ = vx_pub
+            self.last_vy_pub_ = vy_pub
+
         self.odom_msg_.twist.twist.linear.x = vx_pub
         self.odom_msg_.twist.twist.linear.y = vy_pub
         self.odom_msg_.twist.twist.linear.z = self.vz_imu_
@@ -1166,6 +1958,15 @@ class MaridOdomPublisher(Node):
         tank_t_str = f"{self.tank_temperature_:.2f}" if self.tank_temperature_ is not None else "N/A"
         status.values.append(KeyValue(key="Tank pressure (Pa)", value=tank_p_str))
         status.values.append(KeyValue(key="Tank temperature (K)", value=tank_t_str))
+        status.values.append(KeyValue(key="Mag ready", value=str(self.mag_ready_)))
+        status.values.append(KeyValue(key="Mag valid", value=str(self.mag_valid_)))
+        status.values.append(KeyValue(key="Mag yaw (deg)", value=f"{math.degrees(self.mag_yaw_):.1f}"))
+        status.values.append(KeyValue(key="Mag age (s)", value=f"{_age(self.last_mag_stamp_):.2f}"))
+        status.values.append(KeyValue(key="Sun valid", value=str(self.sun_valid_)))
+        status.values.append(KeyValue(key="Sun elevation (deg)", value=f"{self.sun_elevation_deg_:.1f}"))
+        sun_yaw_str = f"{math.degrees(self.sun_yaw_):.1f}" if self.sun_valid_ else "N/A"
+        status.values.append(KeyValue(key="Sun yaw (deg)", value=sun_yaw_str))
+        status.values.append(KeyValue(key="Sun age (s)", value=f"{_age(self.last_sun_stamp_):.2f}"))
 
         diag_array.status.append(status)
         self.diag_pub_.publish(diag_array)
