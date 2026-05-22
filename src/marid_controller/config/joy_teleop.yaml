@@ -8,30 +8,14 @@ joy_teleop:
       deadman_buttons: [5]
 
       axis_mappings:
-        linear-x:
-          axis: 1
-          scale: 2.0
-          offset: 0.0
-
-        angular-z:
-          axis: 4
-          scale: -2.0
-          offset: 0.0
-
         # Left stick horizontal -> front differential (roll)
         linear-y:
           axis: 0
-          scale: 2.0
+          scale: 0.045
           offset: 0.0
 
-        # Right stick horizontal -> tail differential (yaw)
-        angular-y:
-          axis: 3
-          scale: 2.0
-          offset: 0.0
-
-        # Right trigger -> center thrust (mapped into linear.z)
-        linear-z:
-          axis: 5
-          scale: -10.0
+        # Right stick vertical -> tail symmetric (pitch)
+        angular-z:
+          axis: 4
+          scale: -0.10
           offset: 0.0

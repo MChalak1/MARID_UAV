@@ -1,9 +1,10 @@
 import os
+import random
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable, TimerAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable, TimerAction
 from launch.substitutions import Command, LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
@@ -22,16 +23,28 @@ def generate_launch_description():
 
     world_arg = DeclareLaunchArgument(
         name="world",
-        default_value=os.path.join(
-            marid_description, "worlds", "empty.sdf"
-        ),
+        default_value="empty.sdf",
         description="Absolute path to world SDF file to load"
+    )
+
+    spawn_yaw_arg = DeclareLaunchArgument(
+        name="spawn_yaw",
+        default_value="0.9",
+        description="Initial model yaw in radians when random_spawn_yaw is false."
+    )
+
+    random_spawn_yaw_arg = DeclareLaunchArgument(
+        name="random_spawn_yaw",
+        default_value="true",
+        description="If true, sample spawn yaw uniformly from [-pi, pi] and pass that same yaw to odometry."
     )
 
     gazebo_resource_path = SetEnvironmentVariable(
         name="GZ_SIM_RESOURCE_PATH",
         value=[
-            str(Path(marid_description).parent.resolve())
+            str(Path(marid_description).parent.resolve()),
+            ":",
+            os.path.join(marid_description, "worlds")
             ]
         )
     
@@ -61,26 +74,6 @@ def generate_launch_description():
             ("on_exit_shutdown", "true")
         ]
     )
-
-
-
-
-    # Timer Action to wait for world spawning
-    gz_spawn_entity = TimerAction(
-        period=3.0,  # 3 seconds for world to fully load
-        actions=[
-            Node(
-        package="ros_gz_sim",
-        executable="create",
-        output="screen",
-        arguments=["-topic", "robot_description",
-                   "-name", "marid",
-                   "-z", "0.2",
-                   ]
-            )
-        ]
-    )
-
     imu_bridge = Node(
     package="ros_gz_bridge",
     executable="parameter_bridge",
@@ -126,16 +119,45 @@ def generate_launch_description():
     output='screen'
     )
 
-    # Include localization launch file
-    localization_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            os.path.join(
-                get_package_share_directory("marid_localization"),
-                "launch",
-                "local_localization.launch.py"
-            )
-        ])
-    )
+    def spawn_and_localization_setup(context, *args, **kwargs):
+        randomize = LaunchConfiguration("random_spawn_yaw").perform(context).lower()
+        if randomize in ("1", "true", "yes", "on"):
+            spawn_yaw = random.uniform(-3.141592653589793, 3.141592653589793)
+        else:
+            spawn_yaw = float(LaunchConfiguration("spawn_yaw").perform(context))
+        spawn_yaw_str = f"{spawn_yaw:.6f}"
+
+        # Timer Action to wait for world spawning
+        gz_spawn_entity = TimerAction(
+            period=3.0,  # 3 seconds for world to fully load
+            actions=[
+                Node(
+                    package="ros_gz_sim",
+                    executable="create",
+                    output="screen",
+                    arguments=[
+                        "-topic", "robot_description",
+                        "-name", "marid",
+                        "-z", "0.2",
+                        "-Y", spawn_yaw_str,
+                    ],
+                )
+            ],
+        )
+
+        localization_launch = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource([
+                os.path.join(
+                    get_package_share_directory("marid_localization"),
+                    "launch",
+                    "local_localization.launch.py"
+                )
+            ]),
+            launch_arguments=[
+                ("initial_ground_yaw", spawn_yaw_str),
+            ],
+        )
+        return [gz_spawn_entity, localization_launch]
 
     controller_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
@@ -150,11 +172,12 @@ def generate_launch_description():
     return LaunchDescription([
         model_arg,
         world_arg,
+        spawn_yaw_arg,
+        random_spawn_yaw_arg,
         gazebo_resource_path,
         robot_state_publisher_node,
         gazebo,
-        gz_spawn_entity,
         imu_bridge,
-        localization_launch,
+        OpaqueFunction(function=spawn_and_localization_setup),
         controller_launch,
     ])

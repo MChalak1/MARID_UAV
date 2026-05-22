@@ -15,19 +15,41 @@ from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchA
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from ament_index_python.packages import get_package_share_directory
 import os
+import math
+import random
 
 def generate_launch_description():
     return LaunchDescription([
         # Declare launch arguments for destination coordinates
         DeclareLaunchArgument(
             'destination_latitude',
-            default_value='34.0522',  # Los Angeles, CA
-            description='Destination latitude in degrees'
+            default_value='48.8566',  # Paris, France randomization center
+            description='Destination latitude in degrees, or random destination center when random_location is true'
         ),
         DeclareLaunchArgument(
             'destination_longitude',
-            default_value='-118.2437',  # Los Angeles, CA
-            description='Destination longitude in degrees'
+            default_value='2.3522',  # Paris, France randomization center
+            description='Destination longitude in degrees, or random destination center when random_location is true'
+        ),
+        DeclareLaunchArgument(
+            'random_location',
+            default_value='true',
+            description='Generate a random GPS destination near destination_latitude/longitude. Set false to use the exact destination.'
+        ),
+        DeclareLaunchArgument(
+            'random_location_min_radius_m',
+            default_value='1000.0',
+            description='Minimum random destination distance from destination_latitude/longitude in meters'
+        ),
+        DeclareLaunchArgument(
+            'random_location_max_radius_m',
+            default_value='5000.0',
+            description='Maximum random destination distance from destination_latitude/longitude in meters'
+        ),
+        DeclareLaunchArgument(
+            'random_location_seed',
+            default_value='',
+            description='Optional RNG seed for reproducible random destinations'
         ),
         DeclareLaunchArgument(
             'destination_x',
@@ -49,9 +71,61 @@ def generate_launch_description():
             default_value='10.0',
             description='Initial thrust in Newtons'
         ),
+
+        DeclareLaunchArgument(
+            'target_altitude',
+            default_value='2380.0',
+            description='Target altitude for guidance in meters'
+        ),
+        DeclareLaunchArgument(
+            'random_altitude',
+            default_value='true',
+            description='Generate a random target altitude. Set false to use target_altitude exactly.'
+        ),
+        DeclareLaunchArgument(
+            'random_altitude_min_m',
+            default_value='300.0',
+            description='Minimum random target altitude in meters'
+        ),
+        DeclareLaunchArgument(
+            'random_altitude_max_m',
+            default_value='3000.0',
+            description='Maximum random target altitude in meters'
+        ),
+
+        DeclareLaunchArgument(
+            'enable_logging',
+            default_value='true',
+            description='Enable attitude controller logging'
+        ),
         # Use OpaqueFunction to access launch arguments and convert to floats
         OpaqueFunction(function=launch_setup)
     ])
+
+def _as_bool(value):
+    return str(value).lower() in ('true', '1', 'yes', 'on')
+
+def _random_lat_lon_near(lat_deg, lon_deg, min_radius_m, max_radius_m):
+    min_radius_m = max(0.0, min_radius_m)
+    max_radius_m = max(min_radius_m, max_radius_m)
+    distance_m = random.uniform(min_radius_m, max_radius_m)
+    bearing_rad = random.uniform(0.0, 2.0 * math.pi)
+
+    earth_radius_m = 6371000.0
+    lat1 = math.radians(lat_deg)
+    lon1 = math.radians(lon_deg)
+    angular_distance = distance_m / earth_radius_m
+
+    lat2 = math.asin(
+        math.sin(lat1) * math.cos(angular_distance)
+        + math.cos(lat1) * math.sin(angular_distance) * math.cos(bearing_rad)
+    )
+    lon2 = lon1 + math.atan2(
+        math.sin(bearing_rad) * math.sin(angular_distance) * math.cos(lat1),
+        math.cos(angular_distance) - math.sin(lat1) * math.sin(lat2),
+    )
+    lon2 = (lon2 + math.pi) % (2.0 * math.pi) - math.pi
+    return math.degrees(lat2), math.degrees(lon2), distance_m, math.degrees(bearing_rad)
 
 def launch_setup(context):
     # Get launch argument values and convert to float
@@ -59,13 +133,50 @@ def launch_setup(context):
     destination_lon = float(context.launch_configurations['destination_longitude'])
     destination_x = float(context.launch_configurations.get('destination_x', '-1.0'))
     destination_y = float(context.launch_configurations.get('destination_y', '-1.0'))
+    random_location = _as_bool(context.launch_configurations.get('random_location', 'true'))
+    random_min_radius_m = float(context.launch_configurations.get('random_location_min_radius_m', '1000.0'))
+    random_max_radius_m = float(context.launch_configurations.get('random_location_max_radius_m', '5000.0'))
+    random_seed = context.launch_configurations.get('random_location_seed', '')
     use_center_thruster = context.launch_configurations.get('use_center_thruster', 'true').lower() == 'true'
     initial_thrust = float(context.launch_configurations.get('initial_thrust', '10.0'))
     datum_lat = 37.4  # Match Gazebo world origin (wt.sdf)
     datum_lon = -122.1
+    target_altitude = float(context.launch_configurations.get('target_altitude', '800.0'))
+    random_altitude = _as_bool(context.launch_configurations.get('random_altitude', 'true'))
+    random_altitude_min_m = float(context.launch_configurations.get('random_altitude_min_m', '300.0'))
+    random_altitude_max_m = float(context.launch_configurations.get('random_altitude_max_m', '3000.0'))
+    enable_logging = context.launch_configurations.get('enable_logging', 'true').lower() == 'true'
     
     # Determine if local coordinates are set (both must be != -1.0)
     use_local_coords = (destination_x != -1.0 and destination_y != -1.0)
+
+    if random_location and not use_local_coords:
+        center_lat = destination_lat
+        center_lon = destination_lon
+        if random_seed:
+            random.seed(random_seed)
+        destination_lat, destination_lon, random_distance_m, random_bearing_deg = _random_lat_lon_near(
+            center_lat,
+            center_lon,
+            random_min_radius_m,
+            random_max_radius_m,
+        )
+        print(
+            f"[option_a_controller] random_location=true: destination="
+            f"({destination_lat:.6f}, {destination_lon:.6f}), "
+            f"center=({center_lat:.6f}, {center_lon:.6f}), "
+            f"distance={random_distance_m:.1f} m, bearing={random_bearing_deg:.1f} deg"
+        )
+
+    if random_altitude:
+        random_altitude_min_m = max(0.0, random_altitude_min_m)
+        random_altitude_max_m = max(random_altitude_min_m, random_altitude_max_m)
+        target_altitude = random.uniform(random_altitude_min_m, random_altitude_max_m)
+        print(
+            f"[option_a_controller] random_altitude=true: target_altitude="
+            f"{target_altitude:.1f} m, range=({random_altitude_min_m:.1f}, "
+            f"{random_altitude_max_m:.1f}) m"
+        )
     
     # Get launch file paths
     marid_controller_dir = get_package_share_directory('marid_controller')
@@ -93,9 +204,9 @@ def launch_setup(context):
             parameters=[{
                 'initial_thrust': initial_thrust,
                 'min_thrust': 0.0,
-                'thrust_to_weight_ratio': 0.65,  # Reduced from 2.5: gives max thrust ~1.3x weight (reasonable for aircraft)
-                'thrust_increment': 100.0,
-                'world_name': 'wt',
+                'thrust_to_weight_ratio': 0.45,  # Reduced from 2.5: gives max thrust ~1.3x weight (reasonable for aircraft)
+                'thrust_increment': 10.0,
+                'world_name': 'empty',
                 'model_name': 'marid',
                 'link_name': 'base_link_front',
                 'update_rate': 50.0,  # Increased to match thruster plugin update rate
@@ -133,17 +244,17 @@ def launch_setup(context):
                         'datum_latitude': datum_lat,
                         'datum_longitude': datum_lon,
                         # Guidance parameters
-                        'target_altitude': 5.0,  # m
-                        'target_velocity': 80.0,  # m/s — equilibrium ~80 m/s, above 77.5 m/s rotation speed
-                        'altitude_min': 3.0,  # m
-                        'altitude_max': 10.0,  # m
+                        'target_altitude': target_altitude,  # m
+                        'target_velocity': 75.0,  # m/s 
+                        'altitude_min': target_altitude*0.9,  # m
+                        'altitude_max': target_altitude*1.1,  # m
                         'waypoint_tolerance': 2.0,  # m
                         # Guidance limits
                         'max_heading_rate': 0.5,  # rad/s
                         'min_speed': 10.0,  # m/s
                         'max_speed': 100.0,  # m/s
                         # Altitude gate: hold target altitude before navigating
-                        'altitude_tolerance': 0.5,        # m — band around target altitude
+                        'altitude_tolerance': 15.0,        # m — band around target altitude
                         'altitude_stable_duration': 2.0,  # s — hold time before phase transition
                         'use_sim_time': True,
                     }]
@@ -185,13 +296,29 @@ def launch_setup(context):
                         'altitude_kp': 2.0,  # Re-enable for altitude maintenance
                         'altitude_ki': 0.1,
                         'altitude_kd': 0.5,
-                        'target_altitude': 5.0,
+                        'target_altitude': target_altitude,
                         'use_sim_time': True,
                     }]
                 )
             ]
         ),
-        
+
+        # ESKF Ground-Truth Logger - records ESKF vs Gazebo pairs for ML training.
+        # Lock-protected: if joystick_teleop_wings.launch is also running, whichever
+        # started first holds the lock and this instance silently disables itself.
+        Node(
+           package="marid_logging",
+           executable="eskf_gt_logger",
+           name="eskf_gt_logger",
+           output="screen",
+           parameters=[{
+               'log_directory': '~/marid_ws/data_extended',
+               'log_rate': 50.0,
+               'samples_per_file': 10000,
+               'enable_logging': enable_logging,
+           }],
+        ),
+
         # Attitude Controller - Controls surfaces (can subscribe to guidance or use waypoint directly)
         # Optionally can subscribe to guidance heading_rate for coordinated turns
         TimerAction(
@@ -215,14 +342,16 @@ def launch_setup(context):
                         'yaw_ki': 0.0,
                         'yaw_kd': 0.8,  # Increased from 0.3 for better damping
                         # Control surface limits
-                        'wing_max_deflection': 0.5,
-                        'tail_max_deflection': 0.5,
+                        'wing_max_deflection': 0.005,
+                        'tail_max_deflection': 0.045,
                         # Altitude control (tail/wings pitch - works with thrust)
-                        'target_altitude': 5.0,
-                        'altitude_pitch_gain': 0.2,
+                        'target_altitude': target_altitude,
+                        'altitude_pitch_gain': 0.03,
                         'climb_wing_incidence': 0.0,  # rad — fixed wing AoA during climb
-                        'airborne_altitude_threshold': 0.5,  # m — no pitch command below this (on ground)
-                        'pitch_slew_rate': 0.087,  # rad/s — ~5°/s max nose-up rate after liftoff
+                        'airborne_altitude_threshold': 50.0,  # m — pitch command always active (disabled for testing, set to 0.5 m for real runs)
+                        'airborne_speed_threshold': 13.0,   # m/s — must also exceed this to be considered airborne
+                        'pitch_slew_rate': 17.0,  # rad/s — ~1°/s max nose-up rate after liftoff
+                        'roll_slew_rate': 10.0,    # rad/s — ~ limit roll rate for better stability during climb
                         # Waypoint navigation (for attitude control) - use local coordinates if set, otherwise GPS
                         'destination_latitude': destination_lat if not use_local_coords else -1.0,
                         'destination_longitude': destination_lon if not use_local_coords else -1.0,

@@ -44,12 +44,26 @@ def generate_launch_description():
         output="screen",
     )
 
+    pose_estimator_logger = Node(
+        package="marid_logging",
+        executable="eskf_gt_logger",
+        name="eskf_gt_logger",
+        output="screen",
+        parameters=[{
+            'log_directory': '~/marid_ws/data_extended',
+            'log_rate': 50.0,
+            'samples_per_file': 10000,
+            'enable_logging': True,
+        }],
+    )
+
     return LaunchDescription(
         [
             joy_node,
             joy_teleop,
             cmd_vel_to_wings,
             joy_incrementer,
+            pose_estimator_logger,
         ]
     )
 

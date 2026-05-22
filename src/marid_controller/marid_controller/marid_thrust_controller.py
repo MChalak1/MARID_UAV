@@ -76,11 +76,11 @@ class MaridThrustController(Node):
         self.declare_parameter('model_name', 'marid')         # Model name
         self.declare_parameter('link_name', 'base_link_front') # Link to apply force to
         self.declare_parameter('update_rate', 50.0)           # Update rate for thruster commands (Hz)
-        self.declare_parameter('enable_keyboard', True)       # Enable keyboard control
+        self.declare_parameter('enable_keyboard', False)       # Enable keyboard control
         self.declare_parameter('enable_differential', False)  # Enable differential thrust for yaw control
         self.declare_parameter('thrust_to_angvel_gain', 50.0)  # Conversion factor: omega = gain * sqrt(thrust)
         self.declare_parameter('use_thruster_plugin', False)    # Use Gazebo Thruster plugin (True) or legacy wrench (False)
-        self.declare_parameter('use_center_thruster', True)   # Use single center thruster (True) or dual left/right (False)
+        self.declare_parameter('use_center_thruster', False)   # Use single center thruster (True) or dual left/right (False)
         self.declare_parameter('thrust_rate_limit', 450.0)       # Max change rate (N/s) for smooth transitions
         self.declare_parameter('thrust_smoothing_factor', 0.45)  # Exponential smoothing: 0.0 = no smoothing, 1.0 = full smoothing
         
@@ -291,7 +291,7 @@ class MaridThrustController(Node):
                 if self.use_center_thruster_:
                     self.target_center_thrust_ = new_thrust
                 else:
-                    self.target_left_thrust_ = new_thrust
+                    self.target_left_thrust_ = -new_thrust
                     self.target_right_thrust_ = new_thrust
                 self.get_logger().info(f'Thrust target increased to {self.current_thrust_:.2f} N')
     
@@ -546,7 +546,8 @@ class MaridThrustController(Node):
         if self.use_thruster_plugin_:
             self.thrust_center_pub_.publish(Float64(data=0.0))
             self.thrust_left_pub_.publish(Float64(data=float(max(0.0, left_thrust))))
-            self.thrust_right_pub_.publish(Float64(data=float(max(0.0, right_thrust))))
+            # R joint axis is reversed (-X); publish negative so force = (−T)×(−X̂) = forward
+            self.thrust_right_pub_.publish(Float64(data=float(-max(0.0, right_thrust))))
             
             if not hasattr(self, '_thruster_log_counter'):
                 self._thruster_log_counter = 0

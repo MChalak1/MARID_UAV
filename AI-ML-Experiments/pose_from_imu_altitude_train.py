@@ -24,28 +24,19 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 ## Uploading The Data
-# Option A: Single .npz file — set path to your file
-#data_path = "~/marid_ws/data/marid_pose_imu_altitude_XXXX_chunk0000.npz"
-#data_path = Path(data_path).expanduser()
-
-# Note, please make sure to modify the paths to the .npz files to the correct paths on your system.
-# It will inlcude your username in the path, so you will need to change it to your own username.
-# As well as the run number, so you will need to change it to the correct run number.
-# Option B: Multiple .npz files — list all paths to merge (e.g. from two runs)
-data_paths = [
-     Path("~/marid_ws/data/marid_pose_imu_altitude_run1_chunk0000.npz").expanduser(),
-     Path("~/marid_ws/data/marid_pose_imu_altitude_run2_chunk0000.npz").expanduser(),
-]
+# Auto-discover all .npz files in the data directory — no need to update paths manually.
+# Override DATA_DIR if your files are elsewhere.
+DATA_DIR = Path("~/marid_ws/data").expanduser()
 
 # Colab: use uploaded files (run "from google.colab import files" and "uploaded = files.upload()" first)
-# Local: use data_paths above (or set a single path and use [Path(data_path).expanduser()])
+# Local: auto-glob all .npz files in DATA_DIR
 try:
     file_list = list(uploaded.keys())  # Colab
 except NameError:
-    file_list = [str(p) for p in data_paths if p.exists()]
+    file_list = sorted(str(p) for p in DATA_DIR.glob("marid_pose_imu_altitude_*.npz"))
 
 if not file_list:
-    raise FileNotFoundError("No .npz files found. Set data_paths to existing files or use Colab upload.")
+    raise FileNotFoundError(f"No .npz files found in {DATA_DIR}. Run pose_estimator_logger during a flight first.")
 
 X_list, y_list = [], []
 for path in file_list:
@@ -191,7 +182,7 @@ for i in range(4):
     mse = np.mean((y_val_np[:, i] - y_val_pred[:, i])**2)
     print(f'{labels[i]}: MSE = {mse:.6f}')
 
-# Optional: save model and normalization for deployment (e.g. in ROS node)
-# torch.save(model.state_dict(), 'pose_from_imu_altitude.pt')
-# np.savez('pose_from_imu_altitude_norm.npz', X_mean=X_mean, X_std=X_std)
+torch.save(model.state_dict(), DATA_DIR / 'pose_from_imu_altitude.pt')
+np.savez(DATA_DIR / 'pose_from_imu_altitude_norm.npz', X_mean=X_mean, X_std=X_std)
+print(f'Saved model and normalization to {DATA_DIR}')
 

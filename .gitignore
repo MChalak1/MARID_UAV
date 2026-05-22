@@ -200,3 +200,11 @@ Thumbs.db
 *.tmp
 *.bak
 *~
+
+# Flight data and trained models (large binaries, not for version control)
+data/*.npz
+data/*.pt
+data/*.json
+data_extended/*.npz
+data_extended/*.pt
+data_extended/*.json

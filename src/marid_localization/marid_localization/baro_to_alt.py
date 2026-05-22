@@ -26,7 +26,7 @@ class BarometerConverter(Node):
         # Subscribers and publishers
         self.pressure_sub_ = self.create_subscription(
             FluidPressure,
-            '/baro/pressure',  # Change to your barometer topic
+            '/baro/pressure',  
             self.pressure_callback,
             10
         )

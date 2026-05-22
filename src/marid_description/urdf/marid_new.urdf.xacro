@@ -510,6 +510,36 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>  <!-- Pitot at base origin (tune position for nose airflow) -->
   </joint>
 
+  <!-- 5-hole probe lateral (body-y): sensor x-axis rotated to align with body +y -->
+  <link name="airspeed_y_link">
+    <inertial>
+      <mass value="0.001"/>
+      <origin xyz="-1.1 0 0.15"/>
+      <inertia ixx="1e-7" iyy="1e-7" izz="1e-7" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <joint name="airspeed_y_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="airspeed_y_link"/>
+    <origin xyz="0 0 0" rpy="0 0 1.5708"/>
+  </joint>
+
+  <!-- 5-hole probe vertical (body-z): sensor x-axis rotated to align with body +z -->
+  <link name="airspeed_z_link">
+    <inertial>
+      <mass value="0.001"/>
+      <origin xyz="-1.1 0 0.15"/>
+      <inertia ixx="1e-7" iyy="1e-7" izz="1e-7" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <joint name="airspeed_z_joint" type="fixed">
+    <parent link="base_link_front"/>
+    <child link="airspeed_z_link"/>
+    <origin xyz="0 0 0" rpy="0 -1.5708 0"/>
+  </joint>
+
   <link name="baro_link">
     <inertial>
       <mass value="0.001"/>
@@ -531,7 +561,7 @@
       <mass value="0.05"/>
       <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
     </inertial>
-    <collision><origin xyz="0 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
+    <!-- NO COLLISION — spinning collision geometry causes ODE AABB overflow at high RPM -->
     <visual name="thruster_L_visual">
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry><cylinder length="0.1" radius="0.015"/></geometry>
@@ -547,7 +577,7 @@
       <mass value="0.05"/>
       <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
     </inertial>
-    <collision><origin xyz="0 0 0"/><geometry><cylinder length="0.1" radius="0.015"/></geometry></collision>
+    <!-- NO COLLISION — spinning collision geometry causes ODE AABB overflow at high RPM -->
     <visual name="thruster_R_visual">
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry><cylinder length="0.1" radius="0.015"/></geometry>
@@ -560,8 +590,8 @@
   <joint name="thruster_L_joint" type="continuous">
     <parent link="base_link_front"/>
     <child  link="thruster_L"/>
-    <origin xyz="-1.20 -0.3 0.50" rpy="0 0 0"/>
-    <axis xyz="1 0 0"/>  <!-- Reverted: Original axis was correct -->
+    <origin xyz="-1.876 -0.3 0.306" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
     <!-- Continuous joints don't have limits - unlimited rotation for propellers -->
     <dynamics damping="0.0" friction="0.0"/>  <!-- Zero damping to allow full reaction torque visibility -->
   </joint>
@@ -569,8 +599,8 @@
   <joint name="thruster_R_joint" type="continuous">
     <parent link="base_link_front"/>
     <child  link="thruster_R"/>
-    <origin xyz="-1.20 0.3 0.50" rpy="0 0 0"/>
-    <axis xyz="1 0 0"/>  <!-- Normal axis: both axes same, counter-rotation via negative angular velocity -->
+    <origin xyz="-1.876 0.3 0.306" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
     <!-- Continuous joints don't have limits - unlimited rotation for propellers -->
     <dynamics damping="0.0" friction="0.0"/>  <!-- Zero damping to allow full reaction torque visibility -->
   </joint>
@@ -675,25 +705,5 @@
     <origin xyz="-0.5 0 0.1" rpy="0 1.5708 0"/>
   </joint>
 
-
-    <!-- Nose propeller (MulticopterMotorModel: command motor speed rad/s on command/motor_speed_nose) -->
-  <link name="nose_prop">
-    <inertial>
-      <origin xyz="-1.876 0 0.306" rpy="0 0 0"/>
-      <mass value="0.05"/>
-      <inertia ixx="5e-4" ixy="0" ixz="0" iyy="5e-4" iyz="0" izz="5e-4"/>
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0.2" rpy="0 0 0"/>
-      <geometry><cylinder length="0.2" radius="0.015"/></geometry>
-    </visual>
-  </link>
-
-  <joint name="nose_prop_joint" type="continuous">
-    <parent link="base_link_front"/>
-    <child link="nose_prop"/>
-    <origin xyz="0 0 0.2" rpy="0 0 0"/>
-    <axis xyz="1 0 0"/>  <!-- Spin about X (body forward); thrust along +X -->
-  </joint>
 
 </robot>

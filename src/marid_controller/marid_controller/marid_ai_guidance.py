@@ -96,7 +96,7 @@ class MaridAIGuidance(Node):
         
         # Guidance parameters
         self.declare_parameter('target_altitude', 8000.0)  # m
-        self.declare_parameter('target_velocity', 112.0)  # m/s
+        self.declare_parameter('target_velocity', 70.0)  # m/s
         self.declare_parameter('altitude_min', 3.0)  # m
         self.declare_parameter('altitude_max', 10000.0)  # m
         self.declare_parameter('waypoint_tolerance', 2.0)  # m
@@ -107,8 +107,8 @@ class MaridAIGuidance(Node):
         self.declare_parameter('max_speed', 200.0)  # m/s
 
         # Altitude gate: must reach and hold target altitude before navigating
-        self.declare_parameter('altitude_tolerance', 0.5)    # m — how close counts as "at altitude"
-        self.declare_parameter('altitude_stable_duration', 2.0)  # s — how long to hold before navigating
+        self.declare_parameter('altitude_tolerance', 15.0)    # m — how close counts as "at altitude"
+        self.declare_parameter('altitude_stable_duration', 4.0)  # s — how long to hold before navigating
         
         # Get parameters
         self.control_mode_ = self.get_parameter('control_mode').value
@@ -200,19 +200,19 @@ class MaridAIGuidance(Node):
             10
         )
         
-        self.imu_sub_ = self.create_subscription(
-            Imu,
-            '/imu_ekf',
-            self.imu_callback,
-            10
-        )
+        # self.imu_sub_ = self.create_subscription(
+        #     Imu,
+        #     '/imu_ekf',
+        #     self.imu_callback,
+        #     10
+        # )
         
-        self.altitude_sub_ = self.create_subscription(
-            PoseWithCovarianceStamped,
-            '/barometer/altitude',
-            self.altitude_callback,
-            10
-        )
+        # self.altitude_sub_ = self.create_subscription(
+        #     PoseWithCovarianceStamped,
+        #     '/barometer/altitude',
+        #     self.altitude_callback,
+        #     10
+        # )
         
         self.waypoint_sub_ = self.create_subscription(
             PoseStamped,
@@ -279,14 +279,15 @@ class MaridAIGuidance(Node):
     def odom_callback(self, msg):
         """Store current odometry"""
         self.current_odom_ = msg
-    
-    def imu_callback(self, msg):
-        """Store current IMU data"""
-        self.current_imu_ = msg
-    
-    def altitude_callback(self, msg):
-        """Store current altitude from barometer"""
         self.current_altitude_ = msg.pose.pose.position.z
+    
+    # def imu_callback(self, msg):
+    #     """Store current IMU data"""
+    #     self.current_imu_ = msg
+    
+    # def altitude_callback(self, msg):
+    #     """Store current altitude from barometer"""
+    #     self.current_altitude_ = msg.pose.pose.position.z
     
     def waypoint_callback(self, msg):
         """Update destination waypoint (from external source). Ignore our own publishes to avoid feedback loop."""
@@ -345,9 +346,9 @@ class MaridAIGuidance(Node):
             state[8] = yaw
         
         if self.current_imu_ is not None:
-            state[9] = self.current_imu_.angular_velocity.x
-            state[10] = self.current_imu_.angular_velocity.y
-            state[11] = self.current_imu_.angular_velocity.z
+            state[9]  = self.current_odom_.twist.twist.angular.x
+            state[10] = self.current_odom_.twist.twist.angular.y
+            state[11] = self.current_odom_.twist.twist.angular.z
         
         return state
     
@@ -517,12 +518,31 @@ class MaridAIGuidance(Node):
             self.waypoint_status_pub_.publish(status_msg)
             return
 
-        # ── PHASE 2: NAVIGATE ────────────────────────────────────────────────
+        ## ── PHASE 2: NAVIGATE ────────────────────────────────────────────────
         if self.control_mode_ == 'ai' and self.ai_model_ is not None:
             desired_heading_rate, desired_speed = self.compute_ai_guidance(state)
         else:
             desired_heading_rate, desired_speed = self.compute_pid_guidance(state)
             self.control_mode_ = 'pid'
+
+        # ── ALTITUDE PROTECTION DURING NAVIGATION ─────────────────────────────
+        alt_error = self.target_altitude_ - current_altitude
+
+        if alt_error > 8.0:
+            # Below target: reduce navigation aggression
+            desired_speed = max(desired_speed, 22.0)
+
+        if alt_error > 15.0:
+            # Significantly below target: stop turning until altitude recovers
+            desired_heading_rate = 0.0
+            desired_speed = max(desired_speed, 25.0)
+
+        if alt_error > 20.0:
+            # Emergency recovery: force climb-like behavior
+            self.flight_phase_ = 'climb'
+            self._altitude_stable_since_ = None
+            desired_heading_rate = 0.0
+            desired_speed = max(desired_speed, 28.0)
 
         speed_msg = Float64()
         speed_msg.data = float(desired_speed)

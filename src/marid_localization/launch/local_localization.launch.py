@@ -27,6 +27,11 @@ def generate_launch_description():
             default_value='true',
             description='Whether to launch FAST-LIO LiDAR-inertial odometry (publishes /Odometry for EKF)'
         ),
+        DeclareLaunchArgument(
+            'initial_ground_yaw',
+            default_value='0.0',
+            description='Initial ground yaw prior in radians; usually wired from Gazebo spawn_yaw'
+        ),
         Node(
             package="tf2_ros",
             executable="static_transform_publisher",
@@ -127,22 +132,16 @@ def generate_launch_description():
             }]
         ),
 
-        # Add gravity to IMU so Madgwick sees ~9.81 m/s² when level (Gazebo publishes specific force)
-        Node(
-            package='marid_localization',
-            executable='imu_add_gravity.py',
-            name='imu_add_gravity',
-            output='screen',
-            parameters=[{'use_sim_time': True}],
-        ),
-        # Madgwick filter: /imu/with_gravity -> orientation, publishes to /imu/data
+        # Madgwick filter: /imu -> orientation, publishes to /imu/data
+        # gz-sim IMU sensor already outputs specific force including gravity reaction
+        # (+9.81 m/s² when stationary and level). imu_add_gravity was adding a second copy.
         Node(
             package='imu_filter_madgwick',
             executable='imu_filter_madgwick_node',
             name='imu_filter_madgwick',
             output='screen',
             parameters=[imu_filter_config_file, {'use_sim_time': True}],
-            remappings=[('/imu/data_raw', '/imu/with_gravity'), ('/imu/mag', '/magnetometer')],
+            remappings=[('/imu/data_raw', '/imu'), ('/imu/mag', '/magnetometer')],
         ),
         # Republisher: subscribes to Madgwick output (/imu/data), publishes to /imu_ekf (no changes elsewhere)
         Node(
@@ -178,6 +177,10 @@ def generate_launch_description():
                 'use_fastlio': False,
                 'use_eskf': True,
                 'eskf_mode': 'physics',
+                'use_coordinated_turn': True,
+                'use_coordinated_turn_yaw_rate_input': True,
+                'coordinated_turn_yaw_rate_weight': 0.15,
+                'initial_ground_yaw': LaunchConfiguration('initial_ground_yaw'),
             }],
         ),
         # Wheel odometry — taxiing position from joint velocities + IMU heading.
@@ -235,6 +238,7 @@ def generate_launch_description():
                 'min_altitude':        1.0,
                 'depth_scale':         3.0,
                 'velocity_variance':   0.1,
+                'sign_vy':            -1.0,  # forward cam: rightward drone motion → leftward pixel shift → negate
                 'use_sim_time':        True,
             }],
         ),
@@ -248,6 +252,31 @@ def generate_launch_description():
             parameters=[{
                 'gz_topic': '/airspeed',
                 'output_topic': '/airspeed/velocity',
+                'signed': False,
+            }]
+        ),
+        # 5-hole probe lateral (body-y): signed — sideslip can be positive or negative
+        Node(
+            package='marid_localization',
+            executable='airspeed_converter.py',
+            name='airspeed_y_converter',
+            output='screen',
+            parameters=[{
+                'gz_topic': '/airspeed_y',
+                'output_topic': '/airspeed_y/velocity',
+                'signed': True,
+            }]
+        ),
+        # 5-hole probe vertical (body-z): signed — climb/descent can be positive or negative
+        Node(
+            package='marid_localization',
+            executable='airspeed_converter.py',
+            name='airspeed_z_converter',
+            output='screen',
+            parameters=[{
+                'gz_topic': '/airspeed_z',
+                'output_topic': '/airspeed_z/velocity',
+                'signed': True,
             }]
         ),
         

@@ -12,9 +12,9 @@ BUTTON_6 = 6   # thrust halve
 BUTTON_7 = 7   # thrust preset 2165 N
 AXIS_DPAD_V = 7  # D-pad vertical: up=+1, down=-1  (axes[], not buttons[])
 
-THRUST_STEP = 10.0    # N
+THRUST_STEP = 25.0    # N
 THRUST_PRESET = 2165.0  # N
-SURFACE_STEP = 0.02   # rad
+SURFACE_STEP = 0.002   # rad
 
 
 class JoyIncrementer(Node):
@@ -35,7 +35,7 @@ class JoyIncrementer(Node):
 
         qos = rclpy.qos.QoSProfile(depth=1)
 
-        # Thrust goes directly to the Gazebo joint — independent of cmd_vel pipeline
+        # Thrust goes directly to Gazebo center thruster joint
         self.thrust_pub = self.create_publisher(
             Float64, '/model/marid/joint/thruster_center_joint/cmd_thrust', qos)
         self.vtail_pub = self.create_publisher(Float64, '/marid/teleop/vtail', qos)

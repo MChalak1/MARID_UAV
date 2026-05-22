@@ -15,7 +15,11 @@ imu_filter_madgwick:
     fixed_frame: "odom"
     # Not stateless - maintain filter state across messages
     stateless: false
-    # Algorithm gain (default 0.1). Lower = smoother, higher = more responsive
-    gain: 0.1
+    # Algorithm gain (default 0.1). Lower = smoother, higher = more responsive.
+    # 0.3 was chosen for fast cold-start convergence, but the ESKF handles attitude
+    # after seeding so fast Madgwick convergence is not needed in steady flight.
+    # 0.05 reduces sensitivity to centripetal acceleration during sustained banked turns,
+    # which at gain=0.3 was corrupting the mag projection and drifting yaw by 40°+.
+    gain: 0.05
     # Use sim time when running in Gazebo (also set in launch)
     use_sim_time: true

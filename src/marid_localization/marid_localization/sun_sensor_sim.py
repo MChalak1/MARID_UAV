@@ -219,6 +219,9 @@ class SunSensorSim(Node):
         sun_by = (2*(qx*qy-qw*qz)*se[0] + (1-2*(qx*qx+qz*qz))*se[1] + 2*(qy*qz+qw*qx)*se[2])
         sun_bz = (2*(qx*qz+qw*qy)*se[0] + 2*(qy*qz-qw*qx)*se[1] + (1-2*(qx*qx+qy*qy))*se[2])
 
+        if sun_bz <= 0.0:
+            return  # sun below sensor hemisphere — physically not measurable
+
         vec_msg = Vector3Stamped()
         vec_msg.header.stamp = now.to_msg()
         vec_msg.header.frame_id = "base_link_front"
