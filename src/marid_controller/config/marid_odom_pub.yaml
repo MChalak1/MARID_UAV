@@ -1,0 +1,428 @@
+# =============================================================================
+# marid_odom_pub.yaml — Comprehensive parameter file for marid_odom_node
+# Generated: 2026-05-25
+#
+# Usage (local_localization.launch.py):
+#   parameters=[
+#       config_file,                         # ← this file
+#       {'use_sim_time': LaunchConfiguration('use_sim_time')},
+#       {'initial_ground_yaw': LaunchConfiguration('initial_ground_yaw')},
+#   ]
+#
+# Note: 'initial_ground_yaw' and 'use_sim_time' are intentionally NOT set here;
+#       they are injected as LaunchConfiguration() substitutions from the launch
+#       file so the value follows the spawn_yaw / clock argument at runtime.
+# =============================================================================
+
+marid_odom_node:
+  ros__parameters:
+
+    # -------------------------------------------------------------------------
+    # SECTION 1 — Core / IMU integration
+    # -------------------------------------------------------------------------
+
+    # IMU outputs specific force (a_sf = a_true − g) — true for Gazebo gz-sim IMU
+    # Set false only if your IMU plugin subtracts gravity internally (unusual).
+    imu_outputs_specific_force: true
+
+    # Gravitational acceleration [m/s²]
+    # Use 9.80665 (WGS-84 standard) or local measured value.
+    gravity: 9.81
+
+    # Odometry publication rate [Hz].
+    # Must not exceed the IMU publish rate (default 50 Hz).
+    publish_rate: 50.0
+
+    # Safety clamps applied to integrated velocity and acceleration.
+    # Values beyond these are physically impossible for MARID and signal divergence.
+    max_velocity:     200.0   # [m/s]   — ~720 km/h structural limit
+    max_acceleration: 350.0   # [m/s²]  — ~35 g structural limit
+
+    # Simple velocity decay when no sensor updates are available (fallback only).
+    # 1.0 = no decay; 0.95 = 5% per IMU tick.
+    velocity_decay_rate: 0.95
+
+    # Fallback variances for the legacy (non-ESKF) weighted-average path.
+    # These are unused when use_eskf=true; kept for backward compatibility.
+    base_position_variance:  0.01    # [m²]
+    base_velocity_variance:  0.1     # [(m/s)²]
+    variance_growth_rate:    0.001   # [m²/s] — grows with time since last update
+
+    # TF child frame attached to the published /marid/odom odometry message.
+    child_frame_id: "base_link_front_imu"
+
+    # Whether to broadcast the odom→base_link_front_imu TF transform.
+    publish_tf: true
+
+    # *** initial_ground_yaw — DO NOT set here ***
+    # This param is injected by local_localization.launch.py as:
+    #   'initial_ground_yaw': LaunchConfiguration('initial_ground_yaw')
+    # which is wired to the Gazebo spawn_yaw at launch time.
+    # Setting it here would override the runtime value.
+    # initial_ground_yaw: 0.0  # [rad]
+
+    # -------------------------------------------------------------------------
+    # SECTION 2 — IMU calibration (static bias estimation at startup)
+    # -------------------------------------------------------------------------
+
+    # Number of IMU samples averaged to estimate accel/gyro static bias.
+    # At 50 Hz → 100 samples = 2 s of stationary warm-up.
+    # Increase if vibration during startup causes large bias estimates.
+    calibration_required: 20
+
+    # Max dt accepted during calibration [s].
+    # Samples with dt > this are skipped (protects against startup jitter).
+    calibration_max_dt: 0.05
+
+    # -------------------------------------------------------------------------
+    # SECTION 3 — Altitude sensors (barometer + sonar)
+    # -------------------------------------------------------------------------
+
+    # Barometer altitude fusion
+    use_barometer: true
+    # Blend weight in legacy weighted-average (not used in ESKF path).
+    baro_weight: 0.98
+
+    # Sonar (downward ultrasonic) altitude fusion
+    use_sonar: true
+    sonar_range_topic: "/sonar/range"
+    # Blend weight in legacy path; ESKF uses eskf_r_alt_sonar instead.
+    sonar_weight: 0.95
+    # Maximum AGL [m] at which sonar readings are trusted.
+    # Above this the beam diverges and returns are unreliable.
+    max_sonar_altitude: 5.0
+
+    # -------------------------------------------------------------------------
+    # SECTION 4 — FAST-LIO LiDAR-inertial odometry
+    # -------------------------------------------------------------------------
+
+    # Whether to subscribe to and fuse FAST-LIO odometry.
+    use_fastlio: false
+    fastlio_topic: "/Odometry"
+
+    # Blend weight for position fusion in legacy path.
+    fastlio_position_weight: 0.7
+    # Blend weight for yaw fusion in legacy path (FAST-LIO scan-match yaw).
+    fastlio_yaw_weight: 0.3
+
+    # Maximum AGL [m] at which FAST-LIO is trusted.
+    # Above this altitude LiDAR ground-returns degrade; ESKF stops fusing.
+    max_fastlio_altitude: 30.0
+
+    # Low-pass alpha for differencing FAST-LIO poses to get velocity.
+    # Lower = smoother but more latency; 0.3 is a good balance.
+    fastlio_velocity_alpha: 0.3
+
+    # -------------------------------------------------------------------------
+    # SECTION 5 — Velocity sensors (airspeed, optical flow, forward camera)
+    # -------------------------------------------------------------------------
+
+    # Legacy IMU-integrated XY velocity path — disabled when ESKF is active.
+    use_imu_xy: true
+
+    # --- Pitot / airspeed (forward body-x velocity) ---
+    use_airspeed: true
+    # Blend weight in legacy path; ESKF uses eskf_r_vel_airspeed.
+    airspeed_weight: 0.8
+    # Gate: below this speed [m/s] the pitot signal is too noisy to fuse.
+    min_airspeed_for_fusion: 0.5
+    # Wind estimate topic (used when use_wind_correction=true).
+    wind_topic: "/wind/velocity"
+    # Apply wind subtraction to compute inertial velocity from airspeed.
+    # Keep false unless a reliable wind estimator is running; wind model
+    # errors at low speed cause more harm than good.
+    use_wind_correction: false
+    # Timeout [s] — if no pitot message arrives within this period, pitot is
+    # considered stale and ESKF skips the airspeed update.
+    airspeed_timeout: 1.0
+
+    # --- Optical flow (downward camera, low-altitude body velocity) ---
+    use_optical_flow: true
+    optical_flow_topic: "/optical_flow/velocity"
+    # Blend weight in legacy path; ESKF uses eskf_r_vel.
+    optical_flow_weight: 0.7
+    # Active AGL band [m].  Below min: too close for stable focus.
+    # Above max: sonar drops out and scale becomes inaccurate.
+    min_of_altitude: 0.3
+    max_of_altitude: 4.5
+    # Max pitch [deg] for OF fusion — steep dive corrupts pixel-flow scale.
+    max_of_pitch_deg: 5.0
+    # Stale timeout [s].
+    of_timeout: 0.5
+
+    # --- Forward camera optical flow (mid-altitude lateral/vertical velocity) ---
+    use_forward_camera: true
+    forward_camera_topic: "/forward_camera/velocity"
+    # Blend weight in legacy path; ESKF uses eskf_r_vel.
+    forward_camera_weight: 0.5
+    # Active only above this AGL [m] (below, downward OF is used instead).
+    min_forward_camera_altitude: 1.0
+    # Stale timeout [s].
+    fwd_cam_timeout: 0.5
+
+    # --- Body-velocity fusion gates ---
+    # Max pitch [deg] for body-frame velocity fusion (airspeed 2D constraint).
+    # Beyond this, the body→world projection becomes numerically unreliable.
+    max_body_velocity_pitch_deg: 32.5
+    # If yaw changed by more than this [deg] in one step, inflate P_v before
+    # fusing body-frame velocity (prevents a stale projection from corrupting v).
+    body_velocity_yaw_jump_deg: 15.0
+    # Duration [s] for which P_v stays inflated after a large yaw jump.
+    body_velocity_yaw_guard_s: 2.0
+
+    # -------------------------------------------------------------------------
+    # SECTION 6 — Wheel odometry (ground operations)
+    # -------------------------------------------------------------------------
+
+    use_wheel_odom: true
+    wheel_odom_topic: "/wheel/odometry"
+    # Sonar threshold [m] below which the aircraft is considered on-ground.
+    # Must match the value used by wheel_odometry.py and is_airborne_ logic.
+    ground_threshold: 0.30
+
+    # -------------------------------------------------------------------------
+    # SECTION 7 — Thrust / drag / fuel-mass model
+    # -------------------------------------------------------------------------
+
+    # Enable thrust-informed drag estimation (physics ESKF prediction).
+    use_thrust_dr: true
+    thrust_topic: "/model/marid/joint/thruster_center_joint/cmd_thrust"
+
+    # Total vehicle mass [kg] used in the physics prediction step.
+    # For physics mode: m = drone_empty_mass + mh2 (tracked online).
+    # This value is the initial total mass; updated each step if track_h2_mass=true.
+    drone_mass: 190.0
+
+    # Initial drag coefficient k_d [(N·s²/m²)] for the RLS identifier.
+    # Typical MARID cruise: k_d ≈ 0.4–0.6.  Validated value: 0.5.
+    drag_coeff_init: 0.5
+
+    # Fraction of total drag that is induced (lift-dependent, bank-angle-scaled).
+    # 0 = pure parasitic; 0.25 → ~25% induced at cruise — matches CFD.
+    induced_drag_frac: 0.25
+
+    # Legacy blend weight for physics-driven vx when FAST-LIO is stale.
+    # Not used in ESKF physics mode (Kalman gain governs everything there).
+    thrust_dr_weight: 0.7
+
+    # RLS forgetting factor for online drag coefficient identification.
+    # 0.99 → ~100-sample memory (~2 s at 50 Hz).
+    # Decrease toward 0.95 if drag changes rapidly (fuel burn, flap extension).
+    rls_forgetting_factor: 0.99
+
+    # Minimum airspeed [m/s] before RLS drag ID is run.
+    # Below this speed drag is dominated by ground effects — skip.
+    min_speed_for_drag_id: 2.0
+
+    # Air density [kg/m³].  Updated at runtime by the air_density_calculator node
+    # if running.  ISA sea-level default.
+    air_density: 1.225
+
+    # Thrust command timeout [s].  If no thrust message arrives within this period,
+    # thrust is set to zero (safe default: no phantom drag subtraction).
+    thrust_timeout: 0.5
+
+    # --- Hydrogen fuel-mass tracking ---
+    track_h2_mass: true
+    # Structural mass without fuel [kg].
+    drone_empty_mass: 160.0
+    # Initial hydrogen mass at start of flight [kg].
+    h2_initial_mass: 30.0
+    # Specific fuel consumption [kg/(N·s)].
+    # 5e-6 ≈ LH₂ fuel cell + electric thruster at 40% combined efficiency.
+    specific_fuel_consumption: 5.0e-6
+    # Topic for tank pressure sensor [Pa] — std_msgs/Float64.
+    tank_pressure_topic: "/tank/pressure"
+    # Topic for tank temperature sensor [K] — std_msgs/Float64.
+    tank_temperature_topic: "/tank/temperature"
+    # Usable tank gas-phase volume [m³] (for ideal-gas mass estimate).
+    tank_volume: 0.5
+    # Kalman weight for tank-sensor mass update (very low: sensor is noisy).
+    tank_sensor_weight: 0.01
+
+    # -------------------------------------------------------------------------
+    # SECTION 8 — ESKF core settings
+    # -------------------------------------------------------------------------
+
+    # Master enable for the Error-State Kalman Filter.
+    # When false, falls back to legacy weighted-average fusion (deprecated).
+    use_eskf: true
+
+    # ESKF operating mode:
+    #   "imu"     — n=15: δp(0-2), δv(3-5), δθ(6-8), δba(9-11), δbg(12-14)
+    #   "physics" — n=17: adds δkd(12), δmh2(13); bg_idx shifts to 14
+    # Physics mode adds drag-coefficient and fuel-mass as estimated states;
+    # requires a thrust topic and is the recommended mode for MARID.
+    eskf_mode: "physics"
+
+    # --- SECTION 8a: Measurement noise covariances R ---
+    # All units are variance (σ²).  Lower R → more trust in the sensor.
+
+    # FAST-LIO position [m²].  Sim lidar is near-perfect; keep small.
+    eskf_r_pos: 0.05
+
+    # Generic velocity sensor noise [(m/s)²] — applied to OF, fwd camera, wheel odom.
+    eskf_r_vel: 0.2
+
+    # Forward airspeed (pitot) noise [(m/s)²].
+    # Lower than eskf_r_vel: pitot is cleaner than optical flow.
+    # Calibrated: 0.05 (raised from 0.025 — mild heading-pitch cross-coupling).
+    eskf_r_vel_airspeed: 0.05
+
+    # Zero-sideslip lateral constraint noise [(m/s)²].
+    # Loose: sideslip is small but non-zero in turns; overly tight here biases vy.
+    eskf_r_vel_airspeed_lat: 0.25
+
+    # P velocity inflation [(m/s)²] added when |Δyaw| > body_velocity_yaw_jump_deg.
+    # Allows airspeed to re-lock velocity quickly after a large heading correction.
+    eskf_vel_yaw_jump_inflate: 50.0
+
+    # Sonar altitude noise [m²].  Sim sonar is very clean.
+    # Increase to 0.05 for a noisy real sensor.
+    eskf_r_alt_sonar: 0.005
+
+    # Barometer altitude noise [m²].
+    eskf_r_alt_baro: 0.05
+
+    # Heading (yaw) noise [rad²] — scan-match / FAST-LIO yaw.
+    # Conservative: FAST-LIO yaw can jump at feature-poor transitions.
+    eskf_r_yaw: 0.0475
+
+    # Gravity-alignment (accel-as-gravity) noise [(m/s²)²].
+    # Large because centripetal acceleration contaminates the gravity vector in flight.
+    # Reducing below 2.0 causes roll overshoot after banked turns.
+    eskf_r_acc: 2.0
+
+    # --- SECTION 8b: Process noise covariances Q ---
+    # Q governs how fast covariance P grows during free propagation.
+    # Larger Q → Kalman gains stay high → more responsive to sensor updates.
+
+    # Velocity process noise [(m/s)²/step].
+    # Must be large enough that pitot can pull velocity estimates within ~1 s.
+    eskf_q_vel: 2.0
+
+    # Roll/pitch process noise [rad²/s].
+    # Covers unmodeled aerodynamic moments, flex, gyro quantisation.
+    # Roll/pitch are anchored by gravity at every IMU step — keep conservative.
+    eskf_q_att: 0.01
+
+    # Yaw process noise [rad²/s] — intentionally larger than roll/pitch.
+    # Yaw is corrected only by the sun sensor at 50 Hz; no gravity anchor.
+    # Higher Q_yaw keeps P[ψ,ψ] large enough for the Mahalanobis gate to
+    # pass post-manoeuvre corrections quickly (2s vs 14s at Q_yaw=q_att).
+    # Steady-state cruise accuracy changes minimally: σ_ss 1.2°→1.6°.
+    eskf_q_yaw: 0.05
+
+    # Accelerometer bias process noise [(m/s²)²/step].
+    # 1e-4 ≈ industrial MEMS bias drift; adequate for sim where ba≈0.
+    eskf_q_ba: 1.0e-4
+
+    # Gyro bias initial variance [rad²/s²].
+    # Sets the starting diagonal of P[bg,bg].  Optical-grade gyro: 1e-6.
+    eskf_p_bg: 1.0e-6
+
+    # Gyro bias process noise [rad²/s³].
+    # 1e-8 ≈ optical-grade in-run bias stability; increase to 1e-6 for MEMS gyro.
+    eskf_q_bg: 1.0e-8
+
+    # --- SECTION 8c: Orientation update (Madgwick-to-ESKF) ---
+
+    # Full-quaternion Madgwick orientation noise [rad²].
+    # Keep > eskf_r_raw_tilt: Madgwick yaw can be dynamically biased during turns.
+    eskf_r_ori: 0.03
+
+    # Raw IMU roll/pitch noise [rad²] for the gravity-tilt update.
+    # Small: sim IMU accel is low-noise; gravity update is the primary roll/pitch source.
+    eskf_r_raw_tilt: 0.002
+
+    # Madgwick fallback yaw noise [rad²] — used when sun sensor is stale.
+    # Larger than eskf_r_ori because yaw from Madgwick drifts without magnetometer.
+    eskf_r_yaw_madgwick_fallback: 0.05
+
+    # -------------------------------------------------------------------------
+    # SECTION 9 — Coordinated-turn gyro-bias estimator
+    # -------------------------------------------------------------------------
+
+    # Enable the coordinated-turn update (estimates bg_q and bg_r from ψ̇_aero).
+    # Theory: in coordinated flight ψ̇_aero = (g/V)·tan(φ);
+    # deviation from IMU yaw rate reveals gyro bias in q/r axes.
+    use_coordinated_turn: true
+
+    # Measurement noise [rad²/s²] for the yaw-rate innovation.
+    # Raised from 0.02 → 0.05: shallow-bank roll errors corrupt tan(φ),
+    # generating spurious bg_r corrections at lower authority.
+    eskf_r_coordinated_turn: 0.05
+
+    # Minimum airspeed [m/s] for coordinated-turn update.
+    # Below stall speed the aerodynamic model is invalid.
+    coordinated_turn_min_speed_mps: 5.0
+
+    # Minimum bank angle [deg] for coordinated-turn update (gate — fires at all).
+    # Weight ramps from 0 at this angle to full at coordinated_turn_full_bank_deg,
+    # preventing shallow-bank roll noise from having the same authority as a proper
+    # banked turn.  Previously hard-gated at 13.5° (raised from 5° after bg_r
+    # corruption); now re-lowered to 5° with the weight ramp as the noise guard.
+    coordinated_turn_min_bank_deg: 2.5
+
+    # Bank angle [deg] at which the full yaw-rate weight is reached.
+    # Below this, weight scales as sin(φ)/sin(full_bank).  At or above, weight = full.
+    coordinated_turn_full_bank_deg: 7.0
+
+    # Maximum bank angle [deg] before update is suppressed (likely uncoordinated).
+    coordinated_turn_max_bank_deg: 50.0
+
+    # Minimum AGL [m] for coordinated-turn update.
+    # Prevents erroneous bg estimates from ground-effect aerodynamics.
+    coordinated_turn_min_agl_m: 3.0
+
+    # Freeze roll correction from gravity alignment at banks above this angle [deg].
+    # Prevents centripetal acceleration from being misinterpreted as a roll tilt.
+    gravity_gate_roll_min_bank_deg: 2.0
+
+    # Suppress accel-as-gravity roll gate if |a_x| > this value [m/s²].
+    # High a_x signals thrust or dive — gravity direction is contaminated.
+    gravity_gate_ax_mps2: 6.5
+
+    # Enable aerodynamic yaw-rate propagation augmentation.
+    # Adds (g/V)·tan(φ) to the attitude propagation, reducing yaw error during turns.
+    use_coordinated_turn_yaw_rate_input: true
+    # Authority of the aerodynamic yaw-rate term relative to IMU gyro [0..1].
+    # 0.0 = purely IMU; 1.0 = purely aerodynamic.  0.185 validated on 2026-05-24 flights.
+    coordinated_turn_yaw_rate_weight: 0.185
+
+    # -------------------------------------------------------------------------
+    # SECTION 10 — Sun sensor (absolute yaw / heading)
+    # -------------------------------------------------------------------------
+
+    # Enable sun-sensor yaw fusion.
+    # The sun sensor provides absolute heading without magnetic interference.
+    # Primary yaw source when solar elevation > sun_elevation_min_deg.
+    use_sun_sensor: true
+
+    # Topic for body-frame sun unit vector [geometry_msgs/Vector3Stamped].
+    sun_sensor_topic: "/sun_sensor/sun_vector_body"
+    # Topic for ENU solar azimuth [std_msgs/Float64, radians].
+    sun_azimuth_topic: "/sun_sensor/sun_azimuth_enu_rad"
+    # Topic for solar elevation angle [std_msgs/Float64, degrees].
+    sun_elevation_topic: "/sun_sensor/sun_elevation_deg"
+
+    # Sun sensor yaw measurement noise [rad²].
+    # R=0.004 (~3.6° 1-sigma): gate threshold = sqrt(3.841*(P_yaw+R)).
+    # At liftoff with P_yaw small: threshold ≈8–10° → rejects the ~18° systematic
+    # calibration offset (liftoff snap fix).  As P_yaw grows in flight the gate opens
+    # (P_yaw=0.01 → 13°; P_yaw=0.1 → 36°) so sun can still recover from divergence.
+    # History: 0.0085 → 0.0025 (2026-05-21) → 0.0005 (2026-05-22) → 0.0025 (2026-05-26) ,
+    # restored gate + widened R; gate=False workaround removed).
+    eskf_r_yaw_sun: 0.001
+
+    # Minimum solar elevation [deg] for sun sensor to be considered valid.
+    # Below 10° the ephemeris projection onto the body frame is geometry-noisy.
+    sun_elevation_min_deg: 10.0
+
+    # Timeout [s] — sun sensor considered stale if no message within this period.
+    # When stale, falls back to Madgwick yaw (eskf_r_yaw_madgwick_fallback).
+    sun_sensor_timeout: 1.0
+
+    # Legacy blend weight for sun yaw in non-ESKF path (deprecated).
+    sun_yaw_weight: 0.3
+

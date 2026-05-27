@@ -48,7 +48,10 @@ TRAIN_PER_FLIGHT    = False  # True → one model per flight; False → one mode
 EARLY_STOP_PATIENCE = 100
 VAL_MSE_TARGET      = 0.0
 INCLUDE_MIRRORED    = True   # include logger-saved _mirror flights in train (never in val)
-VAL_FLIGHTS         = []     # mirrors of all val flights excluded from train
+VAL_FLIGHTS         = [                            # cold-start held-out flights (never seen during training)
+    'flight_20260522_210522',                      # 14.3 min, known-good cruise, landing degradation
+    'flight_20260522_074216',                      # 13.2 min, earlier session — different thrust/airspeed profile
+]
 _VAL_TIMESTAMPS = [v.replace('flight_', '') for v in VAL_FLIGHTS]  # for prefix-agnostic mirror exclusion
 
 LABELS = ['Δyaw (rad, wrapped)']

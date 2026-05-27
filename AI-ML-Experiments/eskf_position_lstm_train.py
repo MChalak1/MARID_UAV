@@ -36,7 +36,7 @@ from collections import defaultdict
 # USE_EXTENDED=False → data/ (12-col base ESKF inputs, many old flights)
 # USE_EXTENDED=True  → data_extended/ (23-col enriched: imu_acc, a_excess, yaw sources, airspeed)
 #   Switch to True once ≥8 data_extended flights are available for a meaningful val set.
-USE_EXTENDED = False
+USE_EXTENDED = True
 DATA_FOLDER  = 'data_extended' if USE_EXTENDED else 'data'
 DATA_DIR     = Path(f"~/marid_ws/{DATA_FOLDER}").expanduser()
 
@@ -55,18 +55,10 @@ INCLUDE_MIRRORED    = True   # include logger-saved _mirror flights in train (ne
 USE_AUTOREGRESSIVE  = False  # True → append Δ_{t-1} to LSTM input (input_dim+2);
                               # False → augmented ESKF state only
 VAL_FLIGHTS         = [                            # hold these flights out as cold-start val;
-    "flight_20260516_214622",  # existing benchmark: y-dominant drift
-    "flight_20260516_221112",  # newer setup: x-dominant / cleaner y
-    "flight_20260517_081702",  # newer setup: strong y drift
-    "flight_20260517_083913",  # newer setup: x-dominant drift
-    "flight_20260517_181254",  # newer setup: balanced shorter flight
-    "flight_20260517_184327",  # newer setup: very y-dominant drift
-    "flight_20260516_153217",  # transition/current-ish: very x-dominant drift
-    "flight_20260514_150848",  # older large x/y drift, main-set stress without monster length
+    "flight_20260521_211150",  # oldest session — temporal distribution shift; 2D spread (1041×1304 m); 8.9 min; yaw 4.9°
+    "flight_20260522_062211",  # mid-period — 2D spread (2546×2365 m); 14.6 min; yaw 4.8°
+    "flight_20260523_090404",  # longest flight (29.1 min); 2D spread (4136×3180 m); max drift stress; yaw 3.7°
 ]                                                  # mirrors of all val flights excluded from train
-# Long-horizon stress-test candidate:
-#   flight_20260515_071720 — 94 min, >2 km final drift.
-#   flight dominates the shorter validation flights.
 
 _VAL_TIMESTAMPS = [v.replace('flight_', '') for v in VAL_FLIGHTS]  # for prefix-agnostic mirror exclusion
 

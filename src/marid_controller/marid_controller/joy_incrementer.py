@@ -35,14 +35,16 @@ class JoyIncrementer(Node):
 
         qos = rclpy.qos.QoSProfile(depth=1)
 
-        # Thrust goes directly to Gazebo center thruster joint
+        # Thrust goes through the shared command bus.  marid_thrust_controller is
+        # the only node that should publish the final Gazebo cmd_thrust value.
         self.thrust_pub = self.create_publisher(
-            Float64, '/model/marid/joint/thruster_center_joint/cmd_thrust', qos)
+            Float64, '/marid/thrust/total', qos)
         self.vtail_pub = self.create_publisher(Float64, '/marid/teleop/vtail', qos)
         self.wing_pub = self.create_publisher(Float64, '/marid/teleop/front_wing', qos)
 
         self.create_subscription(Joy, '/joy', self._joy_cb, 10)
-        # Publish thrust at 20 Hz so Gazebo keeps the setpoint even without button activity
+        # Publish thrust at 20 Hz so the thrust controller keeps the setpoint even
+        # without button activity.
         self.create_timer(0.05, self._thrust_timer)
         self.get_logger().info('joy_incrementer ready')
 

@@ -1,60 +1,332 @@
 #!/usr/bin/env python3
 """MARID GPS-denied odometry publisher.
 
-Navigation map:
+This file is intentionally a flat, inspectable estimator node.  Use this
+module legend as the quick map before changing sensor authority or state
+ownership.
+
+===============================================================================
+ARCHITECTURE MAP
+===============================================================================
+
   MARIDESKF
-    - owns the error-state filter math only: nominal state, covariance,
-      process prediction, and measurement updates.
+    Owns the error-state filter math only: nominal state, covariance,
+    process prediction, and measurement updates.
 
   MaridOdomPublisher
-    - owns ROS I/O, sensor freshness, source priority, launch parameters,
-      ESKF seeding, and final /marid/odom publication.
+    Owns ROS I/O, sensor freshness, source priority, launch parameters,
+    ESKF seeding, diagnostics, and final /marid/odom publication.
 
-State ownership in the running node:
-  pose.x/y       -> ESKF position when seeded; FAST-LIO/wheel/DR otherwise.
-  pose.z         -> z_fused_ from sonar/barometer/IMU, not ESKF vertical drift.
-  orientation    -> raw /imu roll-pitch + Madgwick/mag/sun yaw, or ESKF when sane.
-  vx/vy          -> ESKF velocity when seeded; helper velocity stack otherwise.
-  vz             -> IMU vertical velocity, with barometer fallback above LiDAR range.
-  acceleration   -> never directly published; used as gravity/tilt evidence only.
+  publish_odom()
+    Final arbitration point.  Even when internal ESKF state exists, this
+    function decides which pose/twist values are actually published.
 
-ESKF trust/authority legend:
+===============================================================================
+STATE OWNERSHIP
+===============================================================================
+
+  x, y
+    Internal owner:
+      ESKF horizontal position once seeded.
+    Main correction paths:
+      fastlio_callback()          -> MARIDESKF.update_position_xy()
+      wheel_odom_callback()       -> MARIDESKF.update_position_xy() on ground
+    Published by:
+      publish_odom() from self.eskf_.position when ESKF is seeded.
+
+  z
+    Internal owner:
+      z_fused_, not ESKF vertical dead reckoning.
+    Main correction paths:
+      sonar_callback()            -> _update_z_fused(), update_altitude()
+      baro_callback()             -> _update_z_fused(), update_altitude()
+    Published by:
+      publish_odom() from z_fused_.
+    Policy:
+      ESKF p_z is forcibly aligned to z_fused_ before publication; ESKF is not
+      allowed to own altitude because vertical aero/IMU drift was less reliable
+      than sonar/baro/vertical-IMU fusion.
+
+  vx, vy
+    Internal owner:
+      ESKF horizontal velocity once seeded.
+    Main correction paths:
+      airspeed_callback()         -> forward airspeed and zero-sideslip update
+      of_callback()               -> optical-flow body vx/vy update
+      fwd_cam_callback()          -> forward-camera body vy/vz update
+      wheel_odom_callback()       -> ground forward velocity and NHC
+      fastlio_callback()          -> FAST-LIO velocity helper/correction
+    Published by:
+      publish_odom() from self.eskf_.velocity when ESKF is seeded.
+    Policy:
+      Helper blend weights still matter before ESKF seed or when ESKF is
+      disabled.  During normal ESKF operation, R/Q values govern final vx/vy.
+      Velocity-only measurements freeze attitude rows in the Kalman gain, so
+      airspeed/optical-flow/wheel/NHC residuals cannot silently own yaw through
+      P[attitude, velocity] cross-covariance.
+
+  vz
+    Internal owner:
+      vz_imu_ with barometer fallback when FAST-LIO/low-altitude support is stale.
+    Published by:
+      publish_odom() from vz_imu_ or vz_baro_.
+    Policy:
+      ESKF v_z is aligned before publication and is not allowed to own final vz.
+
+  roll, pitch
+    Primary owner:
+      raw /imu orientation when available.
+    Main correction paths:
+      imu_callback()              -> MARIDESKF.update_roll_pitch()
+      eskf_raw_imu_callback()     -> MARIDESKF.update_gravity()
+      imu_callback()              -> MARIDESKF.update_orientation() fallback only
+    Published by:
+      publish_odom() from ESKF attitude when sane; otherwise raw-tilt reference.
+
+  yaw
+    Propagation:
+      eskf_raw_imu_callback()     -> predict_imu() or predict_physics()
+      _apply_coordinated_turn_yaw_rate_input() can assist process yaw rate.
+    Absolute/heading correction:
+      sun_vector_callback()       -> sun yaw, primary when fresh
+      imu_callback()              -> Madgwick yaw fallback when sun is stale/invalid
+      fastlio_callback()          -> optional FAST-LIO yaw correction
+      update_coordinated_turn()   -> yaw gyro-bias correction, not yaw angle
+    Published by:
+      publish_odom(), using ESKF attitude when it agrees with the best available
+      attitude reference, otherwise falling back to that reference.
+    Important distinction:
+      Logged /marid/odom yaw is published yaw, not necessarily raw internal
+      self.eskf_.q yaw if publish_odom() falls back.
+      Velocity-only updates are explicitly not yaw authorities; they may correct
+      velocity, but their Kalman gain attitude rows are frozen.
+
+  acceleration
+    Not published as odometry acceleration.
+    Used by:
+      eskf_raw_imu_callback()     -> prediction and gravity/tilt evidence
+      update_gravity()            -> accelerometer-as-gravity correction
+
+  biases and aero states
+    ba, bg:
+      Owned inside MARIDESKF and changed by prediction/measurement updates.
+    kd, mh2:
+      Physics-mode aero/fuel states used by predict_physics().
+
+===============================================================================
+CALLBACK QUICK INDEX
+===============================================================================
+
+  Final publishing and diagnostics:
+    publish_odom()
+      Final /marid/odom source arbitration for pose, orientation, twist, and TF.
+    publish_diagnostics()
+      Runtime health/authority summary.
+    reset_odometry_callback()
+      Reset state, timestamps, covariance, and heading priors.
+
+  ESKF core:
+    MARIDESKF.predict_imu()
+      IMU propagation of attitude, velocity, and position.
+    MARIDESKF.predict_physics()
+      Aero/physics propagation using thrust, lift, drag, mass, and surfaces.
+    MARIDESKF.update_position_xy()
+      Horizontal position update.
+    MARIDESKF.update_altitude()
+      z update; publisher still owns final z.
+    MARIDESKF.update_body_velocity_1d()
+      One body-axis velocity update; freezes attitude correction.
+    MARIDESKF.update_body_velocity_2d()
+      Body vx/vy update; freezes attitude correction.
+    MARIDESKF.update_airspeed_world_velocity()
+      Forward airspeed plus loose lateral zero-sideslip update; freezes attitude correction.
+    MARIDESKF.update_nhc()
+      Ground non-holonomic constraint: body lateral velocity ~= 0; freezes attitude correction.
+    MARIDESKF.update_heading()
+      Generic horizontal-heading update for sun, Madgwick, FAST-LIO.  Uses the
+      quaternion horizontal-heading Jacobian, not a near-level yaw shortcut.
+    MARIDESKF.update_roll_pitch()
+      Roll/pitch-only attitude correction; freezes yaw correction.
+    MARIDESKF.update_orientation()
+      Full quaternion fallback correction.
+    MARIDESKF.update_gravity()
+      Accelerometer-as-gravity tilt correction; freezes yaw correction.
+    MARIDESKF.update_coordinated_turn()
+      Coordinated-turn constraint, observes gyro yaw-rate bias without directly
+      correcting attitude angle rows.
+
+  Altitude and pose:
+    baro_callback()
+      Barometer altitude, baro-derived vz fallback, z_fused_ update.
+    sonar_callback()
+      Low-altitude range owner and ground-contact signal.
+    fastlio_callback()
+      FAST-LIO x/y, optional yaw, and velocity helper/correction.
+
+  Velocity:
+    airspeed_callback()
+      Pitot forward velocity; ESKF forward and lateral airspeed update.
+    airspeed_y_callback()
+      Optional lateral airspeed update.
+    airspeed_z_callback()
+      Optional vertical airspeed update.
+    of_callback()
+      Optical-flow body vx/vy update.
+    fwd_cam_callback()
+      Forward-camera body vy/vz update.
+    wheel_odom_callback()
+      Ground x/y, forward velocity, and non-holonomic constraint.
+    wind_callback()
+      Wind cache for optional airspeed correction.
+
+  Physics/support:
+    thrust_callback()
+      Thruster command cache for thrust dead reckoning and physics prediction.
+    joint_state_callback()
+      Control-surface deflections for physics-mode prediction.
+    tank_pressure_callback(), tank_temperature_callback()
+      Optional H2 mass correction support.
+
+  Heading and attitude:
+    imu_callback()
+      /imu_ekf Madgwick orientation cache, ESKF seed, raw-tilt/yaw split update.
+    eskf_raw_imu_callback()
+      Raw /imu propagation, gravity update, coordinated-turn updates.
+    sun_vector_callback()
+      Sun-vector tilt compensation and absolute sun yaw update.
+    sun_azimuth_callback(), sun_elevation_callback()
+      Sun ephemeris metadata and validity gate.
+
+===============================================================================
+AUTHORITY / TUNING LEGEND
+===============================================================================
+
   Rule of thumb:
-    - Measurement R params: smaller = more trust, larger = less trust.
-    - Process Q params: larger = state allowed to move more freely.
-    - Blend weights: larger = output pulled more strongly toward that source.
+    Measurement R params: smaller = trust measurement more.
+    Process Q params: larger = let the predicted state move more freely.
+    Blend weights: larger = helper output pulled more strongly toward that source.
+    Gates/timeouts: decide whether a source is eligible, not how strong it is.
 
-  Parameter                         Physical meaning             Consumed at
-  eskf_r_pos                        FAST-LIO / wheel XY          fastlio_callback(), wheel_odom_callback()
-  eskf_r_vel                        OF / fwd cam / wheel vel     of_callback(), fwd_cam_callback(), wheel_odom_callback()
-  eskf_r_vel_airspeed               forward pitot Va_x           airspeed_callback()
-  eskf_r_alt_sonar                  sonar z                      sonar_callback()
-  eskf_r_alt_baro                   barometer z                  baro_callback()
-  eskf_r_yaw                        FAST-LIO yaw                 fastlio_callback()
-  eskf_r_yaw_sun                    sun-sensor yaw               sun_vector_callback()
-  eskf_r_yaw_madgwick_fallback      Madgwick yaw stabilizer      imu_callback()
-  eskf_r_raw_tilt                   raw /imu roll and pitch      imu_callback()
-  eskf_r_acc                        accel-as-gravity tilt        eskf_raw_imu_callback()
-  eskf_r_coordinated_turn           bank authority on b_q/b_r    eskf_raw_imu_callback(), update_coordinated_turn()
-  coordinated_turn_yaw_rate_weight  bank authority on yaw rate   _apply_coordinated_turn_yaw_rate_input()
-  coordinated_turn_min_bank_deg     min bank for yaw coupling    _apply_coordinated_turn_yaw_rate_input(), eskf_raw_imu_callback()
-  coordinated_turn_max_bank_deg     max bank for yaw coupling    _apply_coordinated_turn_yaw_rate_input(), eskf_raw_imu_callback()
-  coordinated_turn_min_speed_mps    min speed for yaw coupling   _apply_coordinated_turn_yaw_rate_input(), eskf_raw_imu_callback()
-  coordinated_turn_min_agl_m        min AGL for yaw coupling     _apply_coordinated_turn_yaw_rate_input(), eskf_raw_imu_callback()
-  induced_drag_frac                 bank/pitch drag authority    predict_physics(), publish_odom()
+  ESKF measurement authority:
+    eskf_r_pos
+      FAST-LIO/wheel x-y position trust.
+      Used in fastlio_callback(), wheel_odom_callback().
+    eskf_r_vel
+      Optical-flow, forward-camera, and wheel velocity trust.
+      Used in of_callback(), fwd_cam_callback(), wheel_odom_callback().
+    eskf_r_vel_airspeed
+      Forward pitot trust.
+      Used in airspeed_callback().
+    eskf_r_vel_airspeed_lat
+      Zero-sideslip/lateral airspeed constraint trust.
+      Used in airspeed_callback().
+    eskf_r_alt_sonar
+      Sonar altitude trust.
+      Used in sonar_callback().
+    eskf_r_alt_baro
+      Barometer altitude trust.
+      Used in baro_callback().
+    eskf_r_yaw
+      FAST-LIO yaw trust.
+      Used in fastlio_callback().
+    eskf_r_yaw_sun
+      Sun absolute yaw trust.
+      Used in sun_vector_callback().
+    eskf_r_yaw_madgwick_fallback
+      Madgwick yaw fallback trust.
+      Used in imu_callback().
+    eskf_r_raw_tilt
+      Raw /imu roll/pitch trust.
+      Used in imu_callback().
+    eskf_r_ori
+      Full Madgwick quaternion fallback trust.
+      Used in imu_callback() only when raw tilt is unavailable.
+    eskf_r_acc
+      Accelerometer-as-gravity tilt trust.
+      Used in eskf_raw_imu_callback(), update_gravity().
+    eskf_r_coordinated_turn
+      Coordinated-turn trust for b_q/b_r correction.
+      Used in eskf_raw_imu_callback(), update_coordinated_turn().
 
-  Non-ESKF/helper authority:
-  fastlio_position_weight           helper x/y position blend    fastlio_callback()
-  fastlio_yaw_weight                helper yaw blend             fastlio_callback()
-  airspeed_weight                   helper vx blend              publish_odom()
-  optical_flow_weight               helper vx/vy blend           publish_odom()
-  forward_camera_weight             helper vy blend              publish_odom()
-  sonar_weight, baro_weight         z_fused_ blend               _update_z_fused()
+  Cross-covariance ownership guards:
+    freeze_bg=True
+      Kinematic measurements do not correct gyro bias through P[bg, measurement].
+      Used by position, altitude, velocity, and NHC updates.
+    freeze_attitude=True
+      Velocity-only measurements do not correct roll/pitch/yaw through
+      P[attitude, velocity].  This keeps sun/Madgwick/FAST-LIO/coordinated-turn
+      paths as the only yaw authorities.
+      Used by update_body_velocity_1d(), update_body_velocity_2d(),
+      update_airspeed_world_velocity(), and update_nhc().
+    freeze_yaw=True
+      Tilt-only measurements do not correct yaw through P[yaw, roll/pitch] or
+      P[yaw, accel-bias].  Used by update_roll_pitch() and update_gravity().
+      Coordinated-turn instead uses freeze_attitude=True: it may correct gyro
+      bias, but not the current attitude angle.
 
-  Note: with use_eskf=True and once seeded, publish_odom() overwrites vx_pub/vy_pub
-  with self.eskf_.velocity. Helper weights still matter before seeding or when ESKF
-  is disabled, but ESKF R/Q parameters govern the final published vx/vy during
-  normal ESKF operation.
+  ESKF process authority:
+    eskf_q_vel
+      Horizontal velocity process freedom.
+    eskf_q_att
+      Attitude process freedom.
+    eskf_q_ba, eskf_q_bg
+      Accelerometer/gyro bias process freedom.
+    eskf_p_bg
+      Initial gyro-bias uncertainty.
+
+  Heading/aero gates and assists:
+    coordinated_turn_yaw_rate_weight
+      More weight = stronger bank/coordinated-turn authority on yaw-rate process input.
+      Used in _apply_coordinated_turn_yaw_rate_input().
+    coordinated_turn_min_bank_deg, coordinated_turn_max_bank_deg
+      Bank range where coordinated-turn logic is allowed.
+    coordinated_turn_min_speed_mps, coordinated_turn_min_agl_m
+      Speed/altitude gates for coordinated-turn logic.
+    gravity_gate_roll_min_bank_deg, gravity_gate_ax_mps2
+      Gating for roll correction from accelerometer-as-gravity.
+    body_velocity_yaw_jump_deg, body_velocity_yaw_guard_s
+      Guard body-velocity updates after large heading corrections.
+    induced_drag_frac
+      Bank/pitch drag authority in predict_physics() and thrust DR.
+
+  Helper/non-ESKF authority:
+    fastlio_position_weight
+      Helper x/y blend before or outside normal ESKF publication.
+    fastlio_yaw_weight
+      Helper yaw blend from FAST-LIO orientation.
+    airspeed_weight
+      Helper vx blend in publish_odom().
+    optical_flow_weight
+      Helper vx/vy blend in publish_odom().
+    forward_camera_weight
+      Helper vy blend in publish_odom().
+    thrust_dr_weight
+      Helper thrust-dead-reckoned vx blend in publish_odom().
+    sonar_weight, baro_weight
+      z_fused_ source blending in _update_z_fused().
+
+===============================================================================
+PUBLISHING RULES
+===============================================================================
+
+  /marid/odom pose:
+    x/y:
+      ESKF position after seed.
+    z:
+      z_fused_ from sonar/baro/vertical-IMU policy.
+    orientation:
+      ESKF quaternion if sane; otherwise reference quaternion from raw tilt and
+      best available yaw.
+
+  /marid/odom twist:
+    vx/vy:
+      ESKF velocity after seed; helper stack before seed or without ESKF.
+    vz:
+      vz_imu_ or vz_baro_ according to altitude-source freshness.
+
+  Ground clamp:
+    publish_odom() clamps published roll/pitch to level on the ground, preserves
+    yaw, and keeps internal ESKF attitude flat enough to prevent taxi-run drift.
 """
 
 import math
@@ -82,11 +354,11 @@ class MARIDESKF:
     Error-State Kalman Filter for GPS-denied pose estimation on MARID.
 
     Two propagation modes:
-      "imu"     — IMU-driven attitude/position propagation, δx ∈ R15
-                  Error state: δp δv δtheta δba δbg
+      "imu"     — IMU-driven attitude/position propagation, δx ∈ R¹⁵
+                  Error state: δp(0:3) δv(3:6) δθ(6:9) δba(9:12) δbg(12:15)
                   Nominal: p(3) v(3) q(4) ba(3) bg(3)
-      "physics" — Aerodynamic-model horizontal prediction, δx ∈ R17
-                  Error state: δp δv δtheta δba δkd δmh2 δbg
+      "physics" — Aerodynamic-model horizontal prediction, δx ∈ R¹⁷
+                  Error state: δp(0:3) δv(3:6) δθ(6:9) δba(9:12) δkd(12) δmh2(13) δbg(14:17)
                   Nominal: p(3) v(3) q(4) ba(3) kd(1) mh2(1) bg(3)
 
     Quaternion convention: [x, y, z, w] matching tf_transformations.
@@ -114,6 +386,7 @@ class MARIDESKF:
         p_mh2: float = 1.0,
         q_vel: float = 0.1,
         q_att: float = 0.01,
+        q_yaw: float = 0.05,   # yaw process noise [rad²/s] — larger than roll/pitch: yaw has only sun at 50 Hz, no gravity anchor
         q_ba:  float = 1e-4,
         q_bg:  float = 1e-6,
         q_kd:  float = 1e-4,
@@ -141,9 +414,10 @@ class MARIDESKF:
         self.g_world    = np.array([0.0, 0.0, -g])
         self.rho        = air_density
         self.mass_empty = mass_empty
-        # bg_idx: where gyro-bias block starts in error state.
-        # IMU  (n=15): [δp δv δθ δba δbg]          → bg at 12
-        # Phys (n=17): [δp δv δθ δba δkd δmh2 δbg] → bg at 14 (kd/mh2 keep indices 12-13)
+        # State layout (error-state indices):
+        # IMU  (n=15): [δp(0:3) δv(3:6) δθ(6:9) δba(9:12) δbg(12:15)]
+        # Phys (n=17): [δp(0:3) δv(3:6) δθ(6:9) δba(9:12) δkd(12) δmh2(13) δbg(14:17)]
+        # bg_idx: where the gyro-bias block starts.
         self.bg_idx     = 12 if mode == "imu" else 14
         self.n          = 15 if mode == "imu" else 17
         # Aerodynamic constants
@@ -158,7 +432,7 @@ class MARIDESKF:
         self.CL_ctrl_tail = CL_ctrl_tail
         self.min_aero_speed = min_aero_speed
         self.induced_drag_frac = induced_drag_frac
-        self.sfc = sfc
+        self.sfc        = sfc
 
         self.p  = np.zeros(3)
         self.v  = np.zeros(3)
@@ -173,10 +447,14 @@ class MARIDESKF:
         if mode == "physics":
             p_diag += [p_kd, p_mh2]
             q_diag += [q_kd, q_mh2]
-        p_diag += [p_bg] * 3   # gyro bias — always last (after kd/mh2 in physics mode)
+        p_diag += [p_bg] * 3   # gyro bias — last block (after kd/mh2 in physics mode)
         q_diag += [q_bg] * 3
         self.P  = np.diag(p_diag).astype(float)
         self.Qc = np.diag(q_diag).astype(float)
+        # Yaw has only the sun sensor (50 Hz) for correction; roll/pitch are additionally
+        # anchored by gravity at every IMU step.  A higher Q_yaw keeps P[ψ,ψ] large enough
+        # for the Mahalanobis gate to pass post-manoeuvre corrections quickly.
+        self.Qc[8, 8] = q_yaw
         self.P0 = self.P.copy()
         self.kd0 = self.kd
         self.mh20 = self.mh2
@@ -238,6 +516,16 @@ class MARIDESKF:
             qw*dw - qx*dx - qy*dy - qz*dz,
         ])
 
+    @classmethod
+    def _horizontal_heading(cls, q):
+        """Heading of the body-forward axis projected onto the world x-y plane."""
+        C = cls._dcm(q)
+        return math.atan2(C[1, 0], C[0, 0])
+
+    @staticmethod
+    def _wrap_pi(angle):
+        return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
     # ------------------------------------------------------------------
     # ESKF prediction models
     # ------------------------------------------------------------------
@@ -261,7 +549,7 @@ class MARIDESKF:
         F = np.zeros((n, n))
         F[0:3, 3:6] = np.eye(3)
         F[6:9, 6:9] = -self._skew(omega_corr)
-        F[6:9, self.bg_idx:self.bg_idx+3] = -np.eye(3)  # δθ̇ = −δbg
+        F[6:9, self.bg_idx:self.bg_idx+3] = -np.eye(3)      # δθ̇ = −δbg
 
         Phi = np.eye(n) + F * dt
         self.P = Phi @ self.P @ Phi.T + self.Qc * dt
@@ -357,15 +645,42 @@ class MARIDESKF:
         _kd_jac   = (-(self.rho * speed_h * self.v * bank_factor) / m).reshape(3, 1)
         _mh2_jac  = (-a_world / m).reshape(3, 1)
         F[3:5, 3:6]   = _drag_jac[0:2, :]   # vx, vy drag coupling
-        F[3:5, 6:9]   = _att_jac[0:2, :]    # vx, vy attitude coupling
+        # At high thrust T/m grows large, making F[v,θ] build P[vy,ψ] faster than
+        # update_heading(sun) can drain it — yaw drifts proportional to thrust.
+        # Ramp att_jac contribution to F (covariance only) to zero above 2500 N so
+        # P[v,θ] stays manageable. State prediction uses explicit physics, not F.
+        _att_jac_scale = max(0.0, min(1.0, 1.0 - (thrust_N - 2500.0) / 500.0))
+        F[3:5, 6:9]   = _att_jac_scale * _att_jac[0:2, :]    # vx, vy attitude coupling
         F[3:5, 12:13] = _kd_jac[0:2]        # vx, vy vs kd
         F[3:5, 13:14] = _mh2_jac[0:2]       # vx, vy vs mh2
         # row 5 (vz) left zero — vz is sensor-driven, not physics-integrated
         F[6:9, 6:9]   = -self._skew(omega_corr)
-        F[6:9, self.bg_idx:self.bg_idx+3] = -np.eye(3)  # δθ̇ = −δbg
+        F[6:9, self.bg_idx:self.bg_idx+3] = -np.eye(3)      # δθ̇ = −δbg
 
         Phi = np.eye(self.n) + F * dt
         self.P = Phi @ self.P @ Phi.T + self.Qc * dt
+
+        # High-thrust P[v,θ] cross-covariance cap.
+        #
+        # At high thrust the physics Jacobian F[v,θ] = (T/m)·[c₁]× + (L/m)·[lift]×
+        # grows proportionally to T/m.  Even with att_jac scaled to zero above 3000 N
+        # (see above), cross-covariance built up during the acceleration phase persists
+        # via Φ[v,v]·P[v,θ]·Φ[θ,θ]ᵀ.  When a velocity measurement then arrives,
+        # K[ψ, vel] = P[ψ,vel]·Hᵀ·S⁻¹ becomes large enough to push yaw by several
+        # degrees — the root cause of thrust-correlated yaw errors seen in flight data
+        # (confirmed by opposite-sign yaw errors in two flights at the same thrust
+        # level, ruling out propeller reaction torque as the mechanism).
+        #
+        # Fix: cap |P[v,θ]| and |P[θ,v]| to max_cross once thrust exceeds the ramp
+        # threshold.  This does NOT claim perfect independence (P stays nonzero) but
+        # prevents unbounded growth.  P[θ,θ] and P[v,v] diagonals are unaffected:
+        # attitude and velocity uncertainties are still honestly tracked; only the
+        # cross-correlation that would let velocity innovations swing yaw is limited.
+        # Threshold matches att_jac ramp start (2500 N) for a smooth hand-off.
+        if thrust_N > 2500.0:
+            max_cross = 1.0e-3
+            self.P[3:6, 6:9] = np.clip(self.P[3:6, 6:9], -max_cross, max_cross)
+            self.P[6:9, 3:6] = self.P[3:6, 6:9].T
 
     # ------------------------------------------------------------------
     # ESKF generic measurement update
@@ -373,13 +688,23 @@ class MARIDESKF:
 
     def _update(self, z: np.ndarray, H: np.ndarray,
                 R_noise: np.ndarray, gate_chi2=None,
-                freeze_bg: bool = False) -> bool:
+                freeze_bg: bool = False,
+                freeze_attitude: bool = False,
+                freeze_yaw: bool = False) -> bool:
         """EKF update with optional Mahalanobis gate. Returns True if applied.
 
         freeze_bg: when True, skip the bg correction.  Use for kinematic
         measurements (position, velocity) whose innovations have no direct
         bearing on gyro bias — the cross-covariance path from P would otherwise
         corrupt bg when those measurements carry systematic errors.
+
+        freeze_attitude: when True, skip the attitude (roll/pitch/yaw) correction.
+        Use for velocity measurements that contain no direct attitude observability
+        — the P[θ,v] cross-covariance path would otherwise let velocity innovations
+        drive yaw through the physics F matrix coupling.
+
+        freeze_yaw: when True, skip only the yaw correction.  Use for tilt-only
+        measurements, where roll/pitch are observable but yaw is not.
         """
         S = H @ self.P @ H.T + R_noise
         if gate_chi2 is not None:
@@ -395,6 +720,10 @@ class MARIDESKF:
             return False
         if freeze_bg:
             K[self.bg_idx:self.bg_idx+3, :] = 0.0
+        if freeze_attitude:
+            K[6:9, :] = 0.0
+        if freeze_yaw:
+            K[8, :] = 0.0
 
         dx = K @ z
         self.p  = self.p  + dx[0:3]
@@ -438,8 +767,9 @@ class MARIDESKF:
         axis=1: body Y / lateral probe
         axis=2: body Z / vertical probe
 
-        Keeps attitude coupling, but limits its authority so noisy Y/Z
-        airspeed does not corrupt roll.
+        The body-frame Jacobian can include weak attitude sensitivity for the
+        measurement geometry, but _update freezes attitude correction so velocity
+        residuals cannot own roll/pitch/yaw through P[attitude, velocity].
         """
 
         C   = self._dcm(self.q)
@@ -457,13 +787,13 @@ class MARIDESKF:
 
         # ---- attitude-coupling limiter ----
         if axis == 0:
-            att_scale = 0.05      # forward airspeed: allow weak attitude correction
+            att_scale = 0.0      # forward airspeed: allow weak attitude correction
             deadband = 0.5
         elif axis == 1:
-            att_scale = 0.01      # lateral airspeed: much weaker, protects roll
+            att_scale = 0.0      # lateral airspeed: much weaker, protects roll
             deadband = 1.0
         else:
-            att_scale = 0.01      # vertical airspeed: much weaker
+            att_scale = 0.0      # vertical airspeed: much weaker
             deadband = 1.0
 
         # Near zero, signed pitot velocity is noisy/ambiguous.
@@ -481,13 +811,14 @@ class MARIDESKF:
             np.array([[r_vel]]),
             self._CHI2_95[1] if gate else None,
             freeze_bg=True,
+            freeze_attitude=True,
         )
 
     def update_body_velocity_2d(self, vx_body: float, vy_body: float,
                                 r_vel: float = 0.5, gate: bool = True):
         """Update from 2D body-frame velocity.
-        Keeps velocity correction strong, but prevents optical flow velocity
-        innovations from over-correcting attitude.
+        Keeps velocity correction strong while _update freezes attitude
+        correction, preventing optical-flow velocity innovations from owning yaw.
         """
         C   = self._dcm(self.q)
         c1  = C[:, 0]
@@ -504,8 +835,8 @@ class MARIDESKF:
 
         # Optical flow is useful, but can be noisy/geometry-dependent.
         # Use weak attitude coupling.
-        att_scale_x = 0.03
-        att_scale_y = 0.01
+        att_scale_x = 0.0
+        att_scale_y = 0.0
 
         if abs(vx_body) > 0.5:
             H[0, 6:9] = att_scale_x * h_att_x
@@ -528,6 +859,7 @@ class MARIDESKF:
             np.eye(2) * r_vel,
             self._CHI2_95[2] if gate else None,
             freeze_bg=True,
+            freeze_attitude=True,
         )
 
     def update_airspeed_world_velocity(self, Va: float,
@@ -558,7 +890,7 @@ class MARIDESKF:
         ])
 
         self._update(innov, H, np.diag([r_fwd, r_lat]),
-                     gate_chi2=None, freeze_bg=True)
+                     gate_chi2=None, freeze_bg=True, freeze_attitude=True)
 
     def update_nhc(self, r_nhc: float = 0.01):
         """Non-Holonomic Constraint: lateral body velocity is zero on the ground.
@@ -573,15 +905,27 @@ class MARIDESKF:
         H[0, 3:6] = c2
         innov = np.array([-float(c2 @ self.v)])   # 0 - vy_body_est
         self._update(innov, H, np.array([[r_nhc]]),
-                     gate_chi2=None, freeze_bg=True)
+                     gate_chi2=None, freeze_bg=True, freeze_attitude=True)
 
     def update_heading(self, yaw_meas: float, r_yaw: float = 0.05, gate: bool = True):
-        """Update from yaw measurement. H = [0,0,1] in δθ block (near-level approx)."""
-        x, y, z, w = self.q
-        yaw_est = math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
-        dy = yaw_meas - yaw_est
-        dy = (dy + math.pi) % (2 * math.pi) - math.pi
-        H  = np.zeros((1, self.n)); H[0, 8] = 1.0
+        """Update from a horizontal-heading measurement.
+
+        The measured heading is the world-frame azimuth of the body-forward axis
+        projected onto the horizontal plane.  For pitched/banked flight this is
+        not the same as the near-level shortcut H[δyaw]=1.  Use the same
+        horizontal-heading geometry as the logger/publisher and compute the
+        attitude Jacobian numerically under the right-perturbation convention
+        used by _boxplus().
+        """
+        yaw_est = self._horizontal_heading(self.q)
+        dy = self._wrap_pi(yaw_meas - yaw_est)
+        H = np.zeros((1, self.n))
+        eps = 1e-5
+        for i in range(3):
+            dtheta = np.zeros(3)
+            dtheta[i] = eps
+            yaw_eps = self._horizontal_heading(self._qnorm(self._boxplus(self.q, dtheta)))
+            H[0, 6 + i] = self._wrap_pi(yaw_eps - yaw_est) / eps
         self._update(np.array([dy]), H, np.array([[r_yaw]]),
                      self._CHI2_95[1] if gate else None)
 
@@ -590,9 +934,10 @@ class MARIDESKF:
         """Update roll/pitch only from a tilt measurement.
 
         Used in simulation where raw /imu orientation has high-quality roll/pitch,
-        while Madgwick remains useful mainly for yaw observability.  The small-angle
+        while sun/Madgwick remain the yaw observability paths.  The small-angle
         H maps local attitude error [δroll, δpitch] to the first two δθ states,
-        matching update_heading's yaw-only approximation below.
+        matching update_heading's yaw-only approximation below.  Yaw is frozen in
+        the Kalman gain because tilt residuals cannot directly observe heading.
         """
         x, y, z, w = self.q
         roll_est = math.atan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
@@ -608,6 +953,7 @@ class MARIDESKF:
             H,
             np.eye(2) * r_tilt,
             self._CHI2_95[2] if gate else None,
+            freeze_yaw=True,
         )
 
     def update_orientation(self, q_meas: np.ndarray, r_ori: float = 0.01,
@@ -644,7 +990,8 @@ class MARIDESKF:
                        gate_roll: bool = False):
         """Soft gravity-alignment update using the accelerometer as a tilt sensor.
 
-        Observable states: roll and pitch.  Yaw is unobservable from gravity alone.
+        Observable states: roll and pitch.  Yaw is unobservable from gravity alone,
+        so yaw correction is frozen even if covariance cross-terms exist.
         Jacobian: H[:,6:9] = [g_body]×  (right-perturbation ESKF convention).
 
         No hard gate.  Instead, noise is scaled by (|a|/g)² so coordinated
@@ -659,11 +1006,23 @@ class MARIDESKF:
         a_norm = np.linalg.norm(a_sf)
         if a_norm < 0.1 * g:
             return  # free-fall — no tilt information
-        # Scale noise by load factor squared: high-g (banked turns) → less trust.
-        # Clamp lf to >= 1 so sub-1g (dives, forward acceleration) does NOT give
-        # extra authority — accelerometer is unreliable in both directions from 1g.
+        # Hard gate: above 5g the specific force is almost certainly a Gazebo physics
+        # artifact or a genuinely catastrophic maneuver — no reliable tilt signal.
+        if a_norm > 5.0 * g:
+            return
+        # Noise scaling: the measurement uncertainty from unknown kinematics scales
+        # linearly with load factor, so the noise std scales as lf and the variance
+        # (passed to _update as R) scales as lf².
+        #
+        # Previous formula: r_scaled = r_acc × lf², then R = r_scaled² → variance ∝ lf⁴.
+        # That caused a 272× variance inflation at 4g — effectively skipping the update
+        # for physically real 4g pitch maneuvers.  The corrected formula below gives 16×
+        # at 4g, which meaningfully deweights without discarding the tilt signal entirely.
+        #
+        # Clamp lf to >= 1: sub-1g (dives, forward acceleration) does NOT get
+        # extra authority — accelerometer is unreliable below 1g too.
         load_factor = max(a_norm / g, 1.0)
-        r_scaled = r_acc * (load_factor * load_factor)
+        r_scaled = r_acc * load_factor        # linear scaling: noise std ∝ lf → R ∝ lf²
         # Predicted specific force in body frame: C^T·[0,0,g]
         g_body = self._dcm(self.q).T @ np.array([0.0, 0.0, g])
         # Bias-corrected specific force: subtract estimated accelerometer bias so the
@@ -671,12 +1030,14 @@ class MARIDESKF:
         a_corr = a_sf - self.ba
         H = np.zeros((3, self.n))
         H[:, 6:9]  = self._skew(g_body)
+        H[:, 8] = 0.0             # δyaw not observable from gravity
         H[:, 9:12] = -np.eye(3)   # ∂/∂δba — gravity measurement directly observes accel bias
         if gate_roll:
             H[:, 6] = 0.0  # δroll not observable — centripetal acceleration contaminates gravity
         self._update(a_corr - g_body, H,
                      np.eye(3) * (r_scaled * r_scaled),
-                     self._CHI2_95[3])
+                     self._CHI2_95[3],
+                     freeze_yaw=True)
 
     def update_coordinated_turn(
         self,
@@ -735,7 +1096,13 @@ class MARIDESKF:
         H[0, self.bg_idx + 1] = sin_phi / cos_theta   # ∂/∂b_q (pitch-axis bias)
         H[0, self.bg_idx + 2] = cos_phi / cos_theta   # ∂/∂b_r (yaw-axis bias)
 
-        return self._update(innov, H, np.array([[r_coor]]), self._CHI2_95[1])
+        return self._update(
+            innov,
+            H,
+            np.array([[r_coor]]),
+            self._CHI2_95[1],
+            freeze_attitude=True,
+        )
 
     # ------------------------------------------------------------------
     # ESKF read-only accessors
@@ -929,7 +1296,8 @@ class MaridOdomPublisher(Node):
         self.declare_parameter("eskf_r_yaw",      0.0475)  # heading noise (rad²) — keep conservative: scan-match yaw can jump
         self.declare_parameter("eskf_r_acc",      2.0)     # gravity-alignment noise (m/s²) — keep soft: acceleration is not pure gravity in flight
         self.declare_parameter("eskf_q_vel",      2.0)     # process noise — velocity
-        self.declare_parameter("eskf_q_att",      0.01)    # process noise — attitude
+        self.declare_parameter("eskf_q_att",      0.01)    # process noise — roll/pitch (rad²/s)
+        self.declare_parameter("eskf_q_yaw",      0.05)    # process noise — yaw (rad²/s); higher than roll/pitch: yaw anchored only by sun at 50 Hz
         self.declare_parameter("eskf_q_ba",       1e-4)    # process noise — accel bias
         self.declare_parameter("eskf_p_bg",       1e-6)    # initial gyro-bias variance (rad²/s²) — optical-grade gyro
         self.declare_parameter("eskf_q_bg",       1e-8)    # process noise — gyro bias (rad²/s³); optical-grade bias stability
@@ -941,7 +1309,8 @@ class MaridOdomPublisher(Node):
         self.declare_parameter("use_coordinated_turn",           True)
         self.declare_parameter("eskf_r_coordinated_turn",        0.05)   # rad²/s² — measurement noise (raised from 0.02: roll errors bias tan(φ) → wrong bg_r when trust is too high)
         self.declare_parameter("coordinated_turn_min_speed_mps", 5.0)    # m/s — below stall: no aero turn
-        self.declare_parameter("coordinated_turn_min_bank_deg",  6.5)    # degrees — yaw bias is observable even in shallow banks with accurate roll
+        self.declare_parameter("coordinated_turn_min_bank_deg",  5.0)    # degrees — gate; weight ramps sin(φ)/sin(full_bank) from here to full authority
+        self.declare_parameter("coordinated_turn_full_bank_deg", 13.5)  # degrees — bank at which full yaw-rate weight is reached
         self.declare_parameter("gravity_gate_roll_min_bank_deg", 2.0)    # degrees — gate accel-as-gravity roll correction during even shallow banks
         self.declare_parameter("gravity_gate_ax_mps2",           6.5)    # m/s² — gate roll when |a_x| exceeds this (thrust/dive contaminates gravity)
         self.declare_parameter("coordinated_turn_max_bank_deg",  50.0)   # degrees — extreme bank: likely uncoordinated
@@ -960,7 +1329,7 @@ class MaridOdomPublisher(Node):
         self.declare_parameter("sun_sensor_topic",          "/sun_sensor/sun_vector_body")
         self.declare_parameter("sun_azimuth_topic",         "/sun_sensor/sun_azimuth_enu_rad")
         self.declare_parameter("sun_elevation_topic",       "/sun_sensor/sun_elevation_deg")
-        self.declare_parameter("eskf_r_yaw_sun",            0.0025)   # rad² — strong absolute yaw, but avoid sun-only yaw yanks
+        self.declare_parameter("eskf_r_yaw_sun",            0.0005)   # rad² — strong absolute yaw, but avoid sun-only yaw yanks
         self.declare_parameter("sun_elevation_min_deg",     10.0)   # gate — below → invalid
         self.declare_parameter("sun_sensor_timeout",        1.0)    # seconds
         self.declare_parameter("sun_yaw_weight",            0.3)    # non-ESKF blend weight
@@ -1092,6 +1461,7 @@ class MaridOdomPublisher(Node):
         self.eskf_r_coor_turn_        = float(self.get_parameter("eskf_r_coordinated_turn").value)
         self.coor_turn_min_spd_       = float(self.get_parameter("coordinated_turn_min_speed_mps").value)
         self.coor_turn_min_bank_rad_  = math.radians(float(self.get_parameter("coordinated_turn_min_bank_deg").value))
+        self.coor_turn_full_bank_rad_ = math.radians(float(self.get_parameter("coordinated_turn_full_bank_deg").value))
         self.gravity_gate_roll_min_bank_rad_ = math.radians(float(self.get_parameter("gravity_gate_roll_min_bank_deg").value))
         self.gravity_gate_ax_mps2_    = float(self.get_parameter("gravity_gate_ax_mps2").value)
         self.coor_turn_max_bank_rad_  = math.radians(float(self.get_parameter("coordinated_turn_max_bank_deg").value))
@@ -1139,6 +1509,7 @@ class MaridOdomPublisher(Node):
                 p_bg =float(self.get_parameter("eskf_p_bg").value),
                 q_vel=float(self.get_parameter("eskf_q_vel").value),
                 q_att=float(self.get_parameter("eskf_q_att").value),
+                q_yaw=float(self.get_parameter("eskf_q_yaw").value),
                 q_ba =float(self.get_parameter("eskf_q_ba").value),
                 q_bg =float(self.get_parameter("eskf_q_bg").value),
                 kd_init           =self.drag_coeff_,
@@ -1318,6 +1689,7 @@ class MaridOdomPublisher(Node):
         self.last_sun_stamp_    = None
         self.sun_valid_         = False  # True when elevation above threshold
         self.sun_yaw_           = 0.0   # last computed heading from sun (rad)
+        self.last_sun_innov_    = float('nan')  # last sun heading innovation (rad) for diagnostics
 
         # Publish fallback state:
         #   Used only when ESKF is unavailable or unseeded; ESKF velocity overwrites
@@ -1500,18 +1872,21 @@ class MaridOdomPublisher(Node):
         return math.atan2(math.sin(angle), math.cos(angle))
 
     def _hybrid_raw_tilt_madgwick_yaw_q(self):
-        """Return [x,y,z,w] using raw /imu roll/pitch and best startup yaw.
+        """Return [x,y,z,w] using raw /imu roll/pitch and best available yaw.
 
-        On the runway, prefer the startup-aligned magnetometer yaw if available;
-        otherwise keep the launch-provided runway yaw prior. Once airborne, the
-        continuous heading updates own yaw.
+        Yaw priority (highest to lowest):
+          1. Sun sensor — physics-based absolute reference, ~0.7° accurate.
+          2. Madgwick   — magnetometer-aided, airborne fallback when sun is stale.
+          3. initial_ground_yaw_ — static prior, last resort before first sun fix.
         """
         _, _, yaw_madg = self._rpy_from_quaternion(
             self.madg_qx_, self.madg_qy_, self.madg_qz_, self.madg_qw_)
-        if not self.is_airborne_:
-            yaw_ref = self.initial_ground_yaw_
-        else:
+        if self._sun_yaw_fresh():
+            yaw_ref = self.sun_yaw_
+        elif self.is_airborne_:
             yaw_ref = yaw_madg
+        else:
+            yaw_ref = self.initial_ground_yaw_
         if self.raw_imu_orientation_ready_:
             roll = self.raw_roll_
             pitch = self.raw_pitch_
@@ -1598,7 +1973,12 @@ class MaridOdomPublisher(Node):
         psi_dot_model = -(self.g_ / airspeed) * math.tan(phi)
         r_model = (psi_dot_model * cos_theta - omega[1] * sin_phi) / cos_phi
         r_model = max(-2.0, min(2.0, r_model))
-        w = self.coor_turn_yaw_rate_weight_
+        # Ramp weight from 0 at min_bank to full at full_bank (sin-ratio scaling).
+        # Prevents shallow-bank roll noise from having the same authority as a
+        # proper banked turn while still allowing bg_z observability at 5°+.
+        sin_full = math.sin(self.coor_turn_full_bank_rad_)
+        w_scale = min(math.sin(bank_abs) / sin_full, 1.0) if sin_full > 1e-6 else 1.0
+        w = self.coor_turn_yaw_rate_weight_ * w_scale
         assisted = omega.copy()
         assisted[2] = (1.0 - w) * omega[2] + w * r_model
         self.yaw_rate_assist_ = assisted[2] - omega[2]
@@ -1710,7 +2090,28 @@ class MaridOdomPublisher(Node):
         z = msg.pose.pose.position.z
         if not self._is_finite(z):
             return
-        self.baro_z_ = float(z)
+        z = float(z)
+
+        # Spike / dropout gate — airborne only.
+        # If the barometer jumps by more than 100 m in a single step while the
+        # vehicle is airborne, the reading is physically implausible (worst-case
+        # real descent ≈ 50 m/s → ≤ 5 m/step at 10 Hz).  The most common cause
+        # is the barometer plugin resetting its altitude reference mid-flight,
+        # which publishes z ≈ 0 from thousands of metres.  Accepting that value
+        # would (a) corrupt z_fused_ → spurious altitude-controller thrust spike,
+        # (b) corrupt eskf_.rho via _isa_density(0) → sea-level density in the
+        # physics model, and (c) propagate the thrust spike through Madgwick
+        # tilt contamination into the sun heading → yaw jump.
+        # Holding the last accepted value breaks all three paths with one gate.
+        if self.baro_ready_ and self.is_airborne_ and abs(z - self.baro_z_) > 100.0:
+            self.get_logger().warn(
+                f"[baro] spike rejected: {z:.1f} m  (prev {self.baro_z_:.1f} m)"
+                " — holding last valid",
+                throttle_duration_sec=2.0,
+            )
+            z = self.baro_z_   # hold last valid; rho and z_fused_ unaffected
+
+        self.baro_z_ = z
         rho = self._isa_density(self.baro_z_)
         self.air_density_ = rho
         if self.eskf_ is not None:
@@ -1732,8 +2133,8 @@ class MaridOdomPublisher(Node):
 
         self._update_z_fused()
         if self.eskf_ is not None and self.eskf_seeded_:
-            if abs(float(z) - self.eskf_.p[2]) < 30.0:
-                self.eskf_.update_altitude(float(z), self.eskf_r_alt_baro_)
+            if abs(self.baro_z_ - self.eskf_.p[2]) < 30.0:
+                self.eskf_.update_altitude(self.baro_z_, self.eskf_r_alt_baro_)
 
     def fastlio_callback(self, msg: Odometry):
         pos = msg.pose.pose.position
@@ -2144,9 +2545,23 @@ class MaridOdomPublisher(Node):
         sun_yaw = self.sun_azimuth_enu_ - math.atan2(bh_y, bh_x)
         sun_yaw = math.atan2(math.sin(sun_yaw), math.cos(sun_yaw))
         self.sun_yaw_ = sun_yaw
-        # ESKF heading update — sun sensor is the most accurate heading source in GPS-denied
+        # ESKF heading update — sun sensor is the most accurate heading source in GPS-denied.
+        # gate=True with R=0.004 (~3.6° 1-sigma): gate threshold = sqrt(3.841 × (P_yaw + R)).
+        # At well-initialised liftoff (P_yaw small): threshold ≈8–10° — rejects the systematic
+        # ~18° sun calibration offset and prevents the liftoff yaw snap.
+        # As P_yaw grows during flight the gate opens: at P_yaw=0.01 threshold≈13°; at P_yaw=0.1
+        # threshold≈36° — sun can still recover from large divergences after Madgwick spikes.
+        # Previous value R=0.0005 gave a 4.4° gate that blocked all corrections; gate=False was
+        # added as a workaround but caused the liftoff snap. Restored gate with wider R.
         if (self.eskf_ is not None and self.eskf_seeded_
                 and self.is_airborne_):
+            # Record pre-update innovation for the internal-state diagnostic publisher.
+            _q = self.eskf_.q
+            _fx = 1.0 - 2.0 * (_q[1] * _q[1] + _q[2] * _q[2])
+            _fy = 2.0 * (_q[0] * _q[1] + _q[3] * _q[2])
+            _yaw_est = math.atan2(_fy, _fx)
+            _innov = sun_yaw - _yaw_est
+            self.last_sun_innov_ = math.atan2(math.sin(_innov), math.cos(_innov))
             self.eskf_.update_heading(sun_yaw, self.eskf_r_yaw_sun_)
         elif self.is_airborne_:
             # Non-ESKF path: blend sun heading into complementary filter.
@@ -2222,18 +2637,23 @@ class MaridOdomPublisher(Node):
                 )
                 _, _, yaw_madg = self._rpy_from_quaternion(
                     self.qx_, self.qy_, self.qz_, self.qw_)
-                self._guard_body_velocity_for_yaw_jump(yaw_madg)
-                # Madgwick yaw is magnetometer-aided and provides continuity even
-                # when sun yaw has geometry/dropout issues. Keep it weak so it does
-                # not dominate the cleaner sun yaw correction.
-                # During banked turns Madgwick's gradient descent mistakes centripetal
-                # acceleration for tilt, corrupting the mag projection and drifting yaw.
-                # Inflate r by 25× when banked >12° in flight so the bad estimate
-                # cannot accumulate into the ESKF; sun sensor (r=0.0085) still dominates.
-                r_madg = self.eskf_r_yaw_madgwick_fallback_
-                if self.is_airborne_ and abs(self.raw_roll_) > math.radians(12.0):
-                    r_madg *= 25.0
-                self.eskf_.update_heading(yaw_madg, r_madg)
+                # Velocity guard uses the best heading reference so that Madgwick
+                # drift (while sun owns yaw) does not trigger spurious P[vx,vy] inflation.
+                sun_fresh = self.is_airborne_ and self._sun_yaw_fresh()
+                heading_ref = self.sun_yaw_ if sun_fresh else yaw_madg
+                self._guard_body_velocity_for_yaw_jump(heading_ref)
+                # Sun is the primary yaw owner when fresh — skip the Madgwick heading
+                # update entirely so magnetometer drift cannot fight the ephemeris
+                # correction. Madgwick resumes only when sun is stale or invalid.
+                # Gate on is_airborne_: in simulation Madgwick has no magnetometer and
+                # holds its spawn-yaw reference on the ground, which would pull the
+                # ESKF back to spawn heading after landing.
+                if not sun_fresh and self.is_airborne_:
+                    r_madg = self.eskf_r_yaw_madgwick_fallback_
+                    if (abs(self.raw_roll_) > math.radians(12.0)
+                            or abs(self.raw_pitch_) > math.radians(20.0)):
+                        r_madg *= 25.0
+                    self.eskf_.update_heading(yaw_madg, r_madg)
             else:
                 self.last_phi_tilt_ref_ = phi_madg
                 # Fallback for real/raw-IMU sources that do not populate orientation.
@@ -2320,7 +2740,7 @@ class MaridOdomPublisher(Node):
             else:
                 if a_sf_valid:
                     self.eskf_.predict_imu(
-                        np.array([ax, ay, az]), omega, dt
+                        np.array([ax, ay, az]), omega, dt,
                     )
             # Pre-compute bank angle once — shared by the gravity roll-gate and the
             # coordinated-turn estimator below, avoiding a duplicate DCM call.
@@ -2504,25 +2924,44 @@ class MaridOdomPublisher(Node):
         self.prev_publish_time_ = now
 
         # ESKF output takes precedence over complementary filter when active.
-        # Altitude (z_fused_, vz_imu_) is intentionally excluded: sonar + baro own
-        # altitude and were accurate before ESKF. ESKF z dead-reckons from vz and
-        # drifts, corrupting the published altitude and making forward motion appear
-        # as altitude gain via the rotated velocity projection.
+        # Altitude: the ESKF now owns the published z, spike-gated against z_fused_.
+        # During a baro dropout, z_fused_ can jump >1000 m in one step.  Two existing
+        # protections already block the ESKF measurement update in that case (the 30 m
+        # consistency check in baro_callback + the Mahalanobis gate in update_altitude),
+        # but the old unconditional forced write at this line defeated them both.
+        # The gated write below lets ESKF dead-reckon from vz_baro_ during a spike;
+        # the write-back then propagates the clean altitude back into z_fused_ so that
+        # all downstream altitude gates (OF, fwd-cam, TF, published odometry) also see
+        # the spike-filtered value.
         if self.eskf_ is not None and self.eskf_seeded_:
-            # Keep the internal ESKF vertical state aligned with the altitude owner
-            # even though only horizontal ESKF states are published from this block.
-            self.eskf_.p[2] = self.z_fused_
+            # Gate the z_fused_ → ESKF altitude sync.
+            # When the deviation is small (≤50 m) the baro is trustworthy and
+            # baro ownership is preserved as before.  When the deviation is large,
+            # eskf_.p[2] stays at the pre-spike dead-reckoned altitude.
+            if abs(self.z_fused_ - self.eskf_.p[2]) <= 50.0:
+                self.eskf_.p[2] = self.z_fused_
+            else:
+                # Baro spike detected: ESKF dead-reckons; z_fused_ still holds the
+                # bad sensor value here — corrected by the write-back below.
+                self.get_logger().warn(
+                    f"[alt] baro spike gate: z_fused={self.z_fused_:.1f} m  "
+                    f"ESKF={self.eskf_.p[2]:.1f} m — ESKF dead-reckoning altitude",
+                    throttle_duration_sec=1.0,
+                )
             self.eskf_.v[2] = self.vz_imu_ if not fastlio_stale else self.vz_baro_
+            # Write the spike-filtered ESKF altitude back into z_fused_ so every
+            # downstream use (published odometry z, TF z, all altitude gates) gets
+            # the clean value for the rest of this publish tick.
+            self.z_fused_ = float(self.eskf_.p[2])
             ep = self.eskf_.position
             eq = self.eskf_.quaternion   # [x,y,z,w]
             self.x_       = float(ep[0])
             self.y_       = float(ep[1])
-            # Divergence gate: only publish ESKF quaternion when it agrees with
-            # the hybrid attitude reference to within ~20° (|cos half-angle| > 0.94).
-            # When the ESKF
-            # diverges (e.g., physics-mode attitude error from corrupted bg) the
-            # published attitude would be wrong.  Fall back to raw roll/pitch +
-            # Madgwick yaw in that case — position (x,y) from ESKF is still used.
+            # Divergence gate: publish ESKF quaternion only when it agrees with the
+            # best available attitude reference (sun yaw when fresh, else Madgwick yaw,
+            # else initial_ground_yaw) to within ~40° yaw (|cos Δψ/2| > 0.94).
+            # When ESKF diverges (e.g., physics-mode error from corrupted bg), fall back
+            # to the reference quaternion — position (x,y) from ESKF is still used.
             att_ref_q = self._hybrid_raw_tilt_madgwick_yaw_q()
             dot = abs(float(np.dot(eq, att_ref_q)))
             if dot > 0.94:   # < ~20° divergence
@@ -2541,6 +2980,12 @@ class MaridOdomPublisher(Node):
             ground_speed = math.hypot(self.vx_, self.vy_)
             if ground_speed > 0.3 and not fastlio_stale:
                 self.ground_yaw_ = math.atan2(self.vy_, self.vx_)
+            elif self.eskf_ is not None and self.eskf_seeded_:
+                # Preserve the heading the drone had at landing. ESKF yaw is frozen
+                # on the ground (Madgwick update gated on is_airborne_), so this
+                # holds the correct post-flight heading rather than snapping to spawn.
+                _, _, cur_eskf_yaw = self._rpy_from_quaternion(*self.eskf_.q)
+                self.ground_yaw_ = cur_eskf_yaw
             cy, sy = math.cos(self.ground_yaw_ / 2), math.sin(self.ground_yaw_ / 2)
             self.qw_ = cy; self.qx_ = 0.0; self.qy_ = 0.0; self.qz_ = sy
             self.qx_, self.qy_, self.qz_, self.qw_ = self.normalize_quaternion(

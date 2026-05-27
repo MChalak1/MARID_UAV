@@ -42,8 +42,11 @@ TRAIN_PER_FLIGHT    = False
 EARLY_STOP_PATIENCE = 100
 VAL_MSE_TARGET      = 0.0
 INCLUDE_MIRRORED    = True   # include logger-saved _mirror flights in train (never in val)
-VAL_FLIGHTS         = []                           # populate with data_extended flight IDs once ≥8 flights available
-                                                   # leave empty → 80/20 in-flight split for smoke testing
+VAL_FLIGHTS         = [                            # cold-start held-out flights (never seen during training)
+    'flight_20260521_211150',                      # oldest session — temporal shift; 2D spread; 8.9 min; yaw 4.9°
+    'flight_20260522_062211',                      # mid-period — 2D spread (2546×2365 m); 14.6 min; yaw 4.8°
+    'flight_20260523_090404',                      # longest flight (29.1 min); max drift stress; yaw 3.7°
+]
 
 LABELS = ['Δvx (m/s)', 'Δvy (m/s)']
 MIN_FLIGHT_STEPS = 2 * CHUNK_LEN

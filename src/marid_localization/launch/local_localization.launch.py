@@ -10,9 +10,12 @@ import os
 
 def generate_launch_description():
     # Get package directory
-    pkg_dir = get_package_share_directory('marid_localization')  
+    pkg_dir = get_package_share_directory('marid_localization')
+    marid_ctrl_dir = get_package_share_directory('marid_controller')
 
     config_file = os.path.join(pkg_dir, 'config', 'ekf.yaml')
+    # Comprehensive parameter file for marid_odom_node — all 107 params with calibration notes.
+    marid_odom_config = os.path.join(marid_ctrl_dir, 'config', 'marid_odom_pub.yaml')
     navsat_config_file = os.path.join(pkg_dir, 'config', 'navsat_transform.yaml')
     imu_filter_config_file = os.path.join(pkg_dir, 'config', 'imu_filter_madgwick.yaml')
 
@@ -166,22 +169,22 @@ def generate_launch_description():
             }],
         ),
         # IMU-based odometry (publishes /marid/odom for EKF when FAST-LIO/Gazebo pose unavailable)
+        # All 107 parameters are loaded from marid_odom_pub.yaml.
+        # Only runtime-substitution values (use_sim_time, initial_ground_yaw) are overridden here;
+        # all tuning / calibration parameters live in the YAML for version control.
         Node(
             package='marid_controller',
             executable='marid_odom_pub.py',
             name='marid_odom_node',
             output='screen',
-            parameters=[{
-                'use_sim_time': LaunchConfiguration('use_sim_time'),
-                'calibration_required': 20,
-                'use_fastlio': False,
-                'use_eskf': True,
-                'eskf_mode': 'physics',
-                'use_coordinated_turn': True,
-                'use_coordinated_turn_yaw_rate_input': True,
-                'coordinated_turn_yaw_rate_weight': 0.15,
-                'initial_ground_yaw': LaunchConfiguration('initial_ground_yaw'),
-            }],
+            parameters=[
+                marid_odom_config,                            # ← all 107 params from YAML
+                {
+                    # Runtime substitutions — must override YAML values at launch time
+                    'use_sim_time':       LaunchConfiguration('use_sim_time'),
+                    'initial_ground_yaw': LaunchConfiguration('initial_ground_yaw'),
+                },
+            ],
         ),
         # Wheel odometry — taxiing position from joint velocities + IMU heading.
         # Only integrates while sonar AGL <= 0.30 m (wheels on ground).
@@ -337,7 +340,7 @@ def generate_launch_description():
                 'lon_deg':              -122.1,
                 'reference_utc':        '2026-04-26T19:00:00',
                 'sun_elevation_min_deg': 10.0,
-                'output_rate_hz':        20.0,
+                'output_rate_hz':        50.0,
                 'use_sim_time':          True,
             }]
         ),

@@ -9,7 +9,10 @@ Target (y,  7-D): ground-truth pose+velocity from /gazebo/odom
     [x, y, roll, pitch, yaw, vx_world, vy_world]
     z/vz excluded (barometer-accurate). Gazebo body-frame twist is rotated to world (ENU)
     to match the world-frame convention of the ESKF inputs.
-Thrust (1-D): total commanded thrust in N from /marid/thrust/total (Float64).
+Thrust (1-D): actual Gazebo center-thruster command in N from
+    /model/marid/joint/thruster_center_joint/cmd_thrust (Float64).
+    This captures joystick, Option A after marid_thrust_controller smoothing, and
+    manual overrides because they all converge at the Gazebo thruster command.
 Heading sidecars (1-D): horizontal-projected body-forward heading for ESKF and GT.
 
 Extended arrays (saved to data_extended only):
@@ -48,7 +51,10 @@ class ESKFGTLogger(Node):
         # ── Parameters ────────────────────────────────────────────────────
         self.declare_parameter('eskf_topic',         '/marid/odom')
         self.declare_parameter('ground_truth_topic', '/gazebo/odom')
-        self.declare_parameter('thrust_topic',       '/marid/thrust/total')
+        self.declare_parameter(
+            'thrust_topic',
+            '/model/marid/joint/thruster_center_joint/cmd_thrust',
+        )
         self.declare_parameter('raw_imu_topic',      '/imu')
         self.declare_parameter('imu_ekf_topic',      '/imu_ekf')
         self.declare_parameter('airspeed_topic',     '/airspeed/velocity')

@@ -350,8 +350,8 @@ def launch_setup(context):
                         'climb_wing_incidence': 0.0,  # rad — fixed wing AoA during climb
                         'airborne_altitude_threshold': 50.0,  # m — pitch command always active (disabled for testing, set to 0.5 m for real runs)
                         'airborne_speed_threshold': 13.0,   # m/s — must also exceed this to be considered airborne
-                        'pitch_slew_rate': 17.0,  # rad/s — ~1°/s max nose-up rate after liftoff
-                        'roll_slew_rate': 10.0,    # rad/s — ~ limit roll rate for better stability during climb
+                        'pitch_slew_rate': 50.0,  # rad/s — ~1°/s max nose-up rate after liftoff
+                        'roll_slew_rate': 40.0,    # rad/s — ~ limit roll rate for better stability during climb
                         # Waypoint navigation (for attitude control) - use local coordinates if set, otherwise GPS
                         'destination_latitude': destination_lat if not use_local_coords else -1.0,
                         'destination_longitude': destination_lon if not use_local_coords else -1.0,

@@ -196,40 +196,44 @@
     </gazebo>
 
 
-    <!-- Aerodynamic Damping for Main Body (prevents uncontrolled rotations and drift) -->
-    <!-- X-forward convention: X = forward, Y = lateral, Z = up -->
+    <!-- Aerodynamic Damping for Main Body — TEMPORARILY DISABLED FOR TEST
+         Hypothesis: the Hydrodynamics plugin (designed for underwater vehicles) applies
+         added-mass terms (xDotU/yDotV/zDotW) that multiply body ACCELERATION.  At the
+         physics-solver level this creates a force-feedback loop that can go numerically
+         unstable for 1-3 ODE steps during large pitch oscillations, producing the
+         observed ax/az spikes of ±64 / ±117 m/s².
+         If the spikes disappear with this block disabled, replace with a simple
+         linear-drag wrench node that avoids the added-mass feedback path.
+         Re-enable by removing the XML comment markers below.
     <gazebo reference="base_link_front">
-        <plugin filename="libgz-sim8-hydrodynamics-system.so" 
+        <plugin filename="libgz-sim8-hydrodynamics-system.so"
                 name="gz::sim::systems::Hydrodynamics">
             <link_name>base_link_front</link_name>
-            
-            <!-- Linear drag (X, Y, Z) - X forward, scaled up for bigger drone -->
-            <xDotU>-1.0</xDotU>    <!-- Forward drag (X-axis) -->
-            <yDotV>-0.5</yDotV>    <!-- Lateral drag (Y-axis) -->
-            <zDotW>-1.2</zDotW>    <!-- Vertical drag (Z-axis) -->
-            
-            <!-- Angular drag - increased for larger vehicle -->
-            <kDotP>-4.6</kDotP>    <!-- Roll damping (around X) — +15% from -4.0 -->
-            <mDotQ>-4.6</mDotQ>    <!-- Pitch damping (around Y) — +15% from -4.0 -->
-            <nDotR>-4.6</nDotR>    <!-- Yaw damping (around Z) — +15% from -4.0 -->
 
-            <!-- Quadratic drag (velocity-squared) -->
-            <xUabsU>-0.12</xUabsU>   <!-- Forward (X) quadratic drag -->
-            <yVabsV>-0.35</yVabsV>   <!-- Lateral (Y) quadratic drag -->
-            <zWabsW>-0.4</zWabsW>    <!-- Vertical quadratic drag -->
-            <kPabsP>-2.3</kPabsP>    <!-- Roll quadratic damping — +15% from -2.0 -->
-            <mQabsQ>-2.3</mQabsQ>    <!-- Pitch quadratic damping — +15% from -2.0 -->
-            <nRabsR>-2.3</nRabsR>    <!-- Yaw quadratic damping — +15% from -2.0 -->
-            
-            <!-- Linear velocity terms (X-forward) -->
-            <xU>-1.5</xU>         <!-- forward (X) -->
-            <yV>-6.0</yV>         <!-- lateral (Y) -->
-            <zW>-6.0</zW>         <!-- vertical (Z) -->
+            <xDotU>-1.0</xDotU>
+            <yDotV>-0.5</yDotV>
+            <zDotW>-1.2</zDotW>
+
+            <kDotP>-4.6</kDotP>
+            <mDotQ>-4.6</mDotQ>
+            <nDotR>-4.6</nDotR>
+
+            <xUabsU>-0.12</xUabsU>
+            <yVabsV>-0.35</yVabsV>
+            <zWabsW>-0.4</zWabsW>
+            <kPabsP>-2.3</kPabsP>
+            <mQabsQ>-2.3</mQabsQ>
+            <nRabsR>-2.3</nRabsR>
+
+            <xU>-1.5</xU>
+            <yV>-6.0</yV>
+            <zW>-6.0</zW>
             <kP>0</kP>
             <mQ>0</mQ>
             <nR>0</nR>
         </plugin>
     </gazebo>
+    -->
 
     <!-- ===== CENTER: Thruster plugin (force in N) - scaled for bigger drone; rotation per thrust_coefficient sign (see comment) ===== -->
     <gazebo>

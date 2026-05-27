@@ -4,11 +4,16 @@ MARID Thrust Controller
 Applies thrust forces to individual thruster links to counter gravity and provide propulsion.
 Uses service-based approach: publishes directly to Gazebo using gz topic commands.
 Keyboard control: Up arrow = +10N, Down arrow = -10N (0-300N range)
+
+Only one instance may own the final Gazebo thrust command at a time. A file lock
+prevents joystick and Option A launches from accidentally running duplicate
+controllers against the same thruster topics.
 """
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64
 from nav_msgs.msg import Odometry
+import fcntl
 import threading
 import sys
 import subprocess
@@ -16,6 +21,10 @@ import os
 import time
 import math
 import xml.etree.ElementTree as ET
+from pathlib import Path
+
+
+_LOCK_PATH = Path('/tmp/marid_thrust_controller.lock')
 
 
 def calculate_total_mass_from_urdf(urdf_string):
@@ -64,6 +73,18 @@ except ImportError:
 class MaridThrustController(Node):
     def __init__(self):
         super().__init__('marid_thrust_controller')
+
+        # Exclusive lock: exactly one controller may publish final Gazebo thrust.
+        self._lock_file = open(_LOCK_PATH, 'w')
+        try:
+            fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.get_logger().warn(
+                'marid_thrust_controller already running; this instance will not command thrust.'
+            )
+            self.control_enabled_ = False
+            return
+        self.control_enabled_ = True
         
         # Parameters
         self.declare_parameter('initial_thrust', 1.0)        # Initial thrust in Newtons
@@ -696,15 +717,26 @@ wrench {{
                 self.get_logger().warn('Check that Gazebo is running and the model is spawned.')
     
     def destroy_node(self):
-        """Clean up keyboard listener on shutdown"""
-        if self.keyboard_listener_ is not None:
+        """Clean up keyboard listener and release the controller lock on shutdown."""
+        if getattr(self, 'keyboard_listener_', None) is not None:
             self.keyboard_listener_.stop()
+        if getattr(self, '_lock_file', None) is not None:
+            try:
+                fcntl.flock(self._lock_file, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            self._lock_file.close()
+            self._lock_file = None
         super().destroy_node()
 
 
 def main():
     rclpy.init()
     node = MaridThrustController()
+    if not getattr(node, 'control_enabled_', True):
+        node.destroy_node()
+        rclpy.shutdown()
+        return
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
