@@ -72,7 +72,7 @@ def generate_launch_description():
         name="eskf_gt_logger",
         output="screen",
         parameters=[{
-            'log_directory': '~/marid_ws/data_extended',
+            'log_directory': '~/marid_ws/data_sync',
             'log_rate': 50.0,
             'samples_per_file': 10000,
             'enable_logging': True,

@@ -660,27 +660,6 @@ class MARIDESKF:
         Phi = np.eye(self.n) + F * dt
         self.P = Phi @ self.P @ Phi.T + self.Qc * dt
 
-        # High-thrust P[v,θ] cross-covariance cap.
-        #
-        # At high thrust the physics Jacobian F[v,θ] = (T/m)·[c₁]× + (L/m)·[lift]×
-        # grows proportionally to T/m.  Even with att_jac scaled to zero above 3000 N
-        # (see above), cross-covariance built up during the acceleration phase persists
-        # via Φ[v,v]·P[v,θ]·Φ[θ,θ]ᵀ.  When a velocity measurement then arrives,
-        # K[ψ, vel] = P[ψ,vel]·Hᵀ·S⁻¹ becomes large enough to push yaw by several
-        # degrees — the root cause of thrust-correlated yaw errors seen in flight data
-        # (confirmed by opposite-sign yaw errors in two flights at the same thrust
-        # level, ruling out propeller reaction torque as the mechanism).
-        #
-        # Fix: cap |P[v,θ]| and |P[θ,v]| to max_cross once thrust exceeds the ramp
-        # threshold.  This does NOT claim perfect independence (P stays nonzero) but
-        # prevents unbounded growth.  P[θ,θ] and P[v,v] diagonals are unaffected:
-        # attitude and velocity uncertainties are still honestly tracked; only the
-        # cross-correlation that would let velocity innovations swing yaw is limited.
-        # Threshold matches att_jac ramp start (2500 N) for a smooth hand-off.
-        if thrust_N > 2500.0:
-            max_cross = 1.0e-3
-            self.P[3:6, 6:9] = np.clip(self.P[3:6, 6:9], -max_cross, max_cross)
-            self.P[6:9, 3:6] = self.P[3:6, 6:9].T
 
     # ------------------------------------------------------------------
     # ESKF generic measurement update
@@ -954,6 +933,7 @@ class MARIDESKF:
             np.eye(2) * r_tilt,
             self._CHI2_95[2] if gate else None,
             freeze_yaw=True,
+            freeze_bg=True,
         )
 
     def update_orientation(self, q_meas: np.ndarray, r_ori: float = 0.01,
@@ -1265,6 +1245,7 @@ class MaridOdomPublisher(Node):
         # If no thrust message arrives within this window, assume glide (thrust = 0).
         # Physics integration keeps running — drag still decelerates the estimate.
         self.declare_parameter("thrust_timeout", 0.5)         # seconds
+        self.declare_parameter("debug_cap_thrust", 0.0)       # diagnostic: cap thrust fed to predict_physics (N); 0 = disabled
 
         # H2 mass tracking — updates drone_mass_ as fuel is consumed.
         # Primary estimator: thrust-based SFC integration (always available).
@@ -1289,6 +1270,7 @@ class MaridOdomPublisher(Node):
         self.declare_parameter("eskf_r_pos",      0.05)    # FAST-LIO position noise (m²) — high-quality sim lidar
         self.declare_parameter("eskf_r_vel",          0.2)   # velocity sensor noise (m²/s²) — OF, fwd camera, wheel odom
         self.declare_parameter("eskf_r_vel_airspeed", 0.05)  # forward airspeed noise (m²/s²) — clean sim pitot
+        self.declare_parameter("debug_cap_airspeed", 0.0)   # diagnostic: cap airspeed fed to ESKF (m/s); 0 = disabled
         self.declare_parameter("eskf_r_vel_airspeed_lat", 0.25)  # zero-sideslip noise (m²/s²) — loose lateral constraint
         self.declare_parameter("eskf_vel_yaw_jump_inflate", 50.0)  # P_v inflation (m²/s²) added on large yaw correction
         self.declare_parameter("eskf_r_alt_sonar", 0.005)  # sonar altitude noise (m²) — clean sim range
@@ -1333,6 +1315,18 @@ class MaridOdomPublisher(Node):
         self.declare_parameter("sun_elevation_min_deg",     10.0)   # gate — below → invalid
         self.declare_parameter("sun_sensor_timeout",        1.0)    # seconds
         self.declare_parameter("sun_yaw_weight",            0.3)    # non-ESKF blend weight
+        # Fixed outlier gate replaces the P-adaptive chi-squared gate for sun heading.
+        # The chi-squared gate blocked innovations > ~4-7° when P_yaw was tight, producing
+        # a stable +6-8° cruise yaw bias.  A 25° fixed threshold rejects only obvious sensor
+        # failures while allowing all physically meaningful corrections.
+        self.declare_parameter("sun_outlier_gate_deg",      45.0)   # deg — hard outlier limit; 45° passes 99.5% of updates even at T=5000N divergence
+        # Propeller reaction-torque feedforward.  The aft pusher propeller creates a
+        # systematic body-z rate offset proportional to thrust.  Subtracting it from the
+        # gyro measurement before ESKF integration removes the offset from bg_r, so the
+        # coordinated-turn estimator converges to pure electronic gyro bias.
+        # Set to 0.0 to disable (default).  Sign: positive value adds ω_z (CCW), negative subtracts.
+        # Offline calibration: k_tau_cal ≈ 6.58e-6 rad/(s·N).
+        self.declare_parameter("propeller_torque_ff",       0.0)    # rad/(s·N) — feedforward; 0.0 = off
 
         # ------------------------------------------------------------------
         # Read parameters: core publication, limits, and frame IDs
@@ -1430,6 +1424,7 @@ class MaridOdomPublisher(Node):
         self.min_speed_drag_id_ = float(self.get_parameter("min_speed_for_drag_id").value)
         self.air_density_       = float(self.get_parameter("air_density").value)
         self.thrust_timeout_    = float(self.get_parameter("thrust_timeout").value)
+        self.debug_cap_thrust_  = float(self.get_parameter("debug_cap_thrust").value)
 
         self.track_h2_mass_    = bool(self.get_parameter("track_h2_mass").value)
         self.drone_empty_mass_ = float(self.get_parameter("drone_empty_mass").value)
@@ -1448,6 +1443,7 @@ class MaridOdomPublisher(Node):
         self.eskf_r_vel_          = float(self.get_parameter("eskf_r_vel").value)
         self.eskf_r_vel_airspeed_     = float(self.get_parameter("eskf_r_vel_airspeed").value)
         self.eskf_r_vel_airspeed_lat_ = float(self.get_parameter("eskf_r_vel_airspeed_lat").value)
+        self.debug_cap_airspeed_      = float(self.get_parameter("debug_cap_airspeed").value)
         self.eskf_vel_jump_inflate_   = float(self.get_parameter("eskf_vel_yaw_jump_inflate").value)
         self.eskf_r_alt_sonar_  = float(self.get_parameter("eskf_r_alt_sonar").value)
         self.eskf_r_alt_baro_   = float(self.get_parameter("eskf_r_alt_baro").value)
@@ -1483,6 +1479,8 @@ class MaridOdomPublisher(Node):
         self.sun_el_min_deg_       = float(self.get_parameter("sun_elevation_min_deg").value)
         self.sun_sensor_timeout_   = float(self.get_parameter("sun_sensor_timeout").value)
         self.sun_yaw_weight_       = float(self.get_parameter("sun_yaw_weight").value)
+        self.sun_outlier_gate_rad_ = math.radians(float(self.get_parameter("sun_outlier_gate_deg").value))
+        self.propeller_torque_ff_  = float(self.get_parameter("propeller_torque_ff").value)
 
         # ------------------------------------------------------------------
         # Runtime objects: TF broadcaster/listener
@@ -2327,6 +2325,8 @@ class MaridOdomPublisher(Node):
             self.last_airspeed_stamp_ = self.get_clock().now()
             if (self.eskf_ is not None and self.eskf_seeded_
                     and val >= self.min_airspeed_):
+                va_eskf = (min(val, self.debug_cap_airspeed_)
+                           if self.debug_cap_airspeed_ > 0.0 else val)
                 if not self.is_airborne_:
                     # On ground or liftoff debounce: 1D forward constraint only.
                     # Using _on_ground() here would switch to 2D on the very first
@@ -2335,7 +2335,7 @@ class MaridOdomPublisher(Node):
                     # 2D zero-sideslip c2=[0,1] fires with a 14+ m/s lateral innovation
                     # and vy snaps to zero in one step. Keep 1D until the airborne
                     # debounce passes so the attitude is stable.
-                    self.eskf_.update_body_velocity_1d(val, axis=0,
+                    self.eskf_.update_body_velocity_1d(va_eskf, axis=0,
                                                        r_vel=self.eskf_r_vel_airspeed_,
                                                        gate=True)
                 else:
@@ -2344,7 +2344,7 @@ class MaridOdomPublisher(Node):
                     # making both world-frame vx and vy observable and preventing
                     # lateral velocity divergence during sustained banked turns.
                     self.eskf_.update_airspeed_world_velocity(
-                        val,
+                        va_eskf,
                         r_fwd=self.eskf_r_vel_airspeed_,
                         r_lat=self.eskf_r_vel_airspeed_lat_,
                     )
@@ -2491,6 +2491,7 @@ class MaridOdomPublisher(Node):
 
         Returns (bh_x, bh_y): forward and left horizontal components.
         Derivation: B_level = R_y(pitch) @ R_x(roll) @ B_body; take [0] and [1].
+        Uses the Madgwick quaternion (self.qx_/qy_/qz_/qw_).
         """
         qx, qy, qz, qw = self.qx_, self.qy_, self.qz_, self.qw_
         roll  = math.atan2(2.0*(qw*qx + qy*qz), 1.0 - 2.0*(qx*qx + qy*qy))
@@ -2499,6 +2500,23 @@ class MaridOdomPublisher(Node):
         cp, sp = math.cos(pitch), math.sin(pitch)
         bh_x = vx*cp + (vy*sr + vz*cr)*sp   # forward (East at yaw=0)
         bh_y = vy*cr - vz*sr                  # left (North at yaw=0)
+        return bh_x, bh_y
+
+    def _tilt_compensate_from_q(self, vx: float, vy: float, vz: float,
+                                 q: np.ndarray):
+        """Same as _tilt_compensate but uses an explicit quaternion [x,y,z,w].
+
+        Used to project the sun body vector using the ESKF roll/pitch rather
+        than Madgwick.  Avoids corrupting sun_yaw when accelerometer spikes
+        contaminate the Madgwick pitch estimate during high-thrust manoeuvres.
+        """
+        qx, qy, qz, qw = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+        roll  = math.atan2(2.0*(qw*qx + qy*qz), 1.0 - 2.0*(qx*qx + qy*qy))
+        pitch = math.asin(max(-1.0, min(1.0, 2.0*(qw*qy - qz*qx))))
+        cr, sr = math.cos(roll), math.sin(roll)
+        cp, sp = math.cos(pitch), math.sin(pitch)
+        bh_x = vx*cp + (vy*sr + vz*cr)*sp
+        bh_y = vy*cr - vz*sr
         return bh_x, bh_y
 
     def _blend_yaw(self, target_yaw: float, weight: float):
@@ -2541,18 +2559,27 @@ class MaridOdomPublisher(Node):
         # Tilt-compensated sun heading in ROS ENU (x=fwd, y=left, z=up):
         #   yaw = az_sun_enu - atan2(bh_y, bh_x)
         # Because: az_sun = atan2(N, E) = yaw + atan2(sun_level_y, sun_level_x)
-        bh_x, bh_y = self._tilt_compensate(sx, sy, sz)
+        #
+        # Use ESKF roll/pitch for tilt compensation when available.
+        # Madgwick (self.qx_) uses the raw accelerometer for pitch correction; large a_z / a_x
+        # spikes (observed 12-18g at high thrust) corrupt its pitch by several degrees, which
+        # through the tilt-compensation formula propagates to ~2.5°/° sun_yaw error at -20° pitch
+        # (corr(|a|, yaw_err) = +0.45 confirmed from flight data).
+        # The ESKF roll/pitch tracks the raw IMU orientation via update_roll_pitch at 50 Hz and
+        # is insensitive to accelerometer spikes through that path.
+        if self.eskf_ is not None and self.eskf_seeded_:
+            bh_x, bh_y = self._tilt_compensate_from_q(sx, sy, sz, self.eskf_.q)
+        else:
+            bh_x, bh_y = self._tilt_compensate(sx, sy, sz)
         sun_yaw = self.sun_azimuth_enu_ - math.atan2(bh_y, bh_x)
         sun_yaw = math.atan2(math.sin(sun_yaw), math.cos(sun_yaw))
         self.sun_yaw_ = sun_yaw
         # ESKF heading update — sun sensor is the most accurate heading source in GPS-denied.
-        # gate=True with R=0.004 (~3.6° 1-sigma): gate threshold = sqrt(3.841 × (P_yaw + R)).
-        # At well-initialised liftoff (P_yaw small): threshold ≈8–10° — rejects the systematic
-        # ~18° sun calibration offset and prevents the liftoff yaw snap.
-        # As P_yaw grows during flight the gate opens: at P_yaw=0.01 threshold≈13°; at P_yaw=0.1
-        # threshold≈36° — sun can still recover from large divergences after Madgwick spikes.
-        # Previous value R=0.0005 gave a 4.4° gate that blocked all corrections; gate=False was
-        # added as a workaround but caused the liftoff snap. Restored gate with wider R.
+        # Gate: fixed 25° outlier threshold (sun_outlier_gate_deg), replacing the former
+        # P-adaptive chi-squared gate. The chi-squared gate oscillated between 4.7° and 7.4°
+        # (f_sun=20 Hz, Q_yaw=0.05, R_sun=0.001), blocking all corrections at the +7° cruise
+        # bias. A fixed outlier gate accepts physical corrections up to 25° and still blocks
+        # obvious sensor failures.
         if (self.eskf_ is not None and self.eskf_seeded_
                 and self.is_airborne_):
             # Record pre-update innovation for the internal-state diagnostic publisher.
@@ -2562,7 +2589,15 @@ class MaridOdomPublisher(Node):
             _yaw_est = math.atan2(_fy, _fx)
             _innov = sun_yaw - _yaw_est
             self.last_sun_innov_ = math.atan2(math.sin(_innov), math.cos(_innov))
-            self.eskf_.update_heading(sun_yaw, self.eskf_r_yaw_sun_)
+            # Fixed outlier gate (sun_outlier_gate_deg, default 25°) replaces the
+            # P-adaptive chi-squared gate.  Root cause analysis: with R_sun=0.001 rad²
+            # and f_sun=20 Hz the steady-state P[ψ,ψ] oscillates between ~7.7e-4 and
+            # ~3.3e-3 rad², giving a chi-squared gate threshold of 4.7°–7.4°.  This
+            # blocked 35% of updates at cruise (+7° bias) and up to 100% when ESKF
+            # diverged past 34° (observed at T=5000N, prop=1.89°/s).  45° gate passes
+            # 99.5% of updates even with ±4.6° sun noise and 34° ESKF divergences.
+            if abs(self.last_sun_innov_) < self.sun_outlier_gate_rad_:
+                self.eskf_.update_heading(sun_yaw, self.eskf_r_yaw_sun_, gate=False)
         elif self.is_airborne_:
             # Non-ESKF path: blend sun heading into complementary filter.
             # Madgwick handles magnetometer; sun provides additional independent correction.
@@ -2710,6 +2745,13 @@ class MaridOdomPublisher(Node):
         if self.eskf_imu_stamp_ is not None:
             dt = (now - self.eskf_imu_stamp_).nanoseconds / 1e9
             omega = np.array([ox, oy, oz])
+            # Propeller reaction-torque feedforward: removes the systematic body-z rate
+            # caused by propeller angular-momentum transfer before ESKF integration.
+            # Leaves bg_r representing only true electronic gyro bias so the
+            # coordinated-turn estimator converges near zero instead of tracking
+            # the propeller offset.  Disabled by default (propeller_torque_ff = 0.0).
+            if self.propeller_torque_ff_ != 0.0:
+                omega[2] += self.propeller_torque_ff_ * self.thrust_N_
             airspeed_fresh = (
                 self.airspeed_ready_
                 and self.last_airspeed_stamp_ is not None
@@ -2728,8 +2770,10 @@ class MaridOdomPublisher(Node):
                 self.yaw_rate_assist_ = 0.0
 
             if self.eskf_mode_ == "physics":
+                thrust_eskf = (min(self.thrust_N_, self.debug_cap_thrust_)
+                               if self.debug_cap_thrust_ > 0.0 else self.thrust_N_)
                 self.eskf_.predict_physics(
-                    self.thrust_N_,
+                    thrust_eskf,
                     omega,
                     self.delta_lw_,
                     self.delta_rw_,
@@ -2781,12 +2825,14 @@ class MaridOdomPublisher(Node):
                     agl = (self.sonar_range_ if self.sonar_ready_ and self.sonar_range_ is not None
                            else self.z_fused_)
                     bank_abs = abs(phi_now)
+                    va_ct = (min(self.last_airspeed_, self.debug_cap_airspeed_)
+                             if self.debug_cap_airspeed_ > 0.0 else self.last_airspeed_)
                     if (self.last_airspeed_ >= self.coor_turn_min_spd_
                             and self.coor_turn_min_bank_rad_ <= bank_abs <= self.coor_turn_max_bank_rad_
                             and agl >= self.coor_turn_min_agl_):
                         self.eskf_.update_coordinated_turn(
                             phi_now, theta_now, oy, oz,
-                            self.last_airspeed_,
+                            va_ct,
                             g=self.g_,
                             r_coor=self.eskf_r_coor_turn_,
                         )
@@ -3265,7 +3311,13 @@ class MaridOdomPublisher(Node):
         status.values.append(KeyValue(key="Sun elevation (deg)", value=f"{self.sun_elevation_deg_:.1f}"))
         sun_yaw_str = f"{math.degrees(self.sun_yaw_):.1f}" if self.sun_valid_ else "N/A"
         status.values.append(KeyValue(key="Sun yaw (deg)", value=sun_yaw_str))
+        sun_innov_str = f"{math.degrees(self.last_sun_innov_):.2f}" if math.isfinite(self.last_sun_innov_) else "N/A"
+        status.values.append(KeyValue(key="Sun innov (deg)", value=sun_innov_str))
         status.values.append(KeyValue(key="Sun age (s)", value=f"{_age(self.last_sun_stamp_):.2f}"))
+        if self.eskf_ is not None and self.eskf_seeded_:
+            status.values.append(KeyValue(key="P_yaw (rad²)", value=f"{self.eskf_.P[8,8]:.6f}"))
+            status.values.append(KeyValue(key="bg_r (deg/s)", value=f"{math.degrees(self.eskf_.bg[2]):.4f}"))
+            status.values.append(KeyValue(key="bg_q (deg/s)", value=f"{math.degrees(self.eskf_.bg[1]):.4f}"))
 
         diag_array.status.append(status)
         self.diag_pub_.publish(diag_array)

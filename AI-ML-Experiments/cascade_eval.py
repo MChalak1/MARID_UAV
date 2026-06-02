@@ -14,19 +14,18 @@ Why no Config D (cascade = Yaw FF + LSTM)?
   pose information, causing double-counting and degraded performance. Removed entirely.
 
 Dead-reckoning reference:
-  gt_pos is published at ~10-17 Hz (repeated 3-9× at 50 Hz logging rate).
-  Comparing ∫eskf_vel against raw gt_pos inflates error ~4×.
-  Correct reference: pos_gt_dr = ∫gt_vel from the same starting point.
-  All position errors are measured against pos_gt_dr.
+  New logs carry per-sample dt from eskf_gt_logger. For those logs, all
+  dead-reckoning integrations use dt directly and compare against Gazebo gt_pos.
+  Older logs have no timing sidecar, so their DR metrics are marked as fixed-DT
+  fallback and should be treated as approximate only.
 
 Metrics per config per flight:
   - Yaw RMSE (deg)
   - Velocity RMSE: vx, vy, combined (m/s)
   - Dead-reckoning position RMSE at 30 s, 60 s, 120 s, 300 s, end-of-flight (m)
-  - Position drift rate (m/min, linear fit on Euclidean error vs time)
   - ESKF sensor-fusion position RMSE vs Gazebo gt_pos (separate from DR errors)
 
-Output: console table + cascade_eval_results.json + cascade_eval_plots.png in data_extended/
+Output: console table + cascade_eval_results.json + cascade_eval_plots.png in DATA_DIR.
 """
 
 import json
@@ -40,18 +39,24 @@ from pathlib import Path
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-DATA_DIR  = Path('~/marid_ws/data_extended').expanduser()
+DATA_DIR      = Path('~/marid_ws/data_sync').expanduser()      # flight chunks (val flights)
+MODEL_DIR     = Path('~/marid_ws/data_sync').expanduser()      # velocity LSTM (retrained)
+MODEL_DIR_FF  = Path('~/marid_ws/data_low_err').expanduser()   # attitude FF (not yet retrained)
 OUT_JSON  = DATA_DIR / 'cascade_eval_results.json'
 OUT_PLOT  = DATA_DIR / 'cascade_eval_plots.png'
 
-DT        = 1.0 / 50.0   # 50 Hz logging rate [s]
+DT        = 1.0 / 50.0   # fallback only for legacy logs without dt [s]
 CHUNK_LEN = 300           # LSTM inference chunk (must match training CHUNK_LEN)
+MAX_SOURCE_AGE_SEC = 0.030
 
 # Val flights held out from velocity LSTM training (cold-start, no data leakage)
 VAL_FLIGHTS = [
-    'flight_20260521_211150',   #  8.9 min, 2D spread 1041×1304 m, yaw err ~4.9°
-    'flight_20260522_062211',   # 14.6 min, 2D spread 2546×2365 m, yaw err ~4.8°
-    'flight_20260523_090404',   # 29.1 min, 2D spread 4136×3180 m, yaw err ~3.7° (longest)
+    'flight_20260531_075734',   # original held-out val flight
+    'flight_20260601_063117',
+    'flight_20260601_071638',
+    'flight_20260601_074510',
+    'flight_20260601_082638',
+    'flight_20260601_090950',
 ]
 
 # Snapshot times for position error table [s]
@@ -66,6 +71,29 @@ _PDOT_MAX = 2.0
 
 def _wrap(a):
     return ((a + np.pi) % (2 * np.pi) - np.pi).astype(np.float32)
+
+
+def _legacy_timebase(n: int):
+    dt = np.full(n, DT, dtype=np.float32)
+    t = np.cumsum(dt, dtype=np.float64).astype(np.float32)
+    return t, dt, 'legacy_fixed_dt'
+
+
+def _chunk_timebase(d: dict, n: int):
+    if 'dt' in d:
+        dt = d['dt'].astype(np.float32).ravel()[:n].copy()
+        dt[~np.isfinite(dt)] = 0.0
+        dt = np.maximum(dt, 0.0)
+        if 't' in d:
+            t = d['t'].astype(np.float64).ravel()[:n].copy()
+            if len(t) == n and np.all(np.isfinite(t)):
+                # Some early sync logs stored wall-clock t but source-stamp dt.
+                # Prefer dt-derived source time whenever the sidecars disagree.
+                if n < 2 or abs(float(t[-1] - t[0]) - float(np.sum(dt))) <= max(0.5, 0.05 * float(np.sum(dt))):
+                    return t.astype(np.float32), dt, 'logged_dt'
+                return np.cumsum(dt, dtype=np.float64).astype(np.float32), dt, 'logged_dt_rebuilt_t'
+        return np.cumsum(dt, dtype=np.float64).astype(np.float32), dt, 'logged_dt'
+    return _legacy_timebase(n)
 
 
 def _augment_eskf_inputs(eskf: np.ndarray, d: dict) -> np.ndarray:
@@ -122,29 +150,74 @@ def load_flight(fid: str):
     eskf   : (T, 12) float32   raw ESKF state
     gt_pos : (T, 2)  float32   [x_gt, y_gt] m  (subsampled ~10-17 Hz; use only as absolute ref)
     gt_yaw : (T,)    float32   yaw_gt rad
-    gt_vel : (T, 2)  float32   [vx_gt, vy_gt] m/s  (world frame, 50 Hz — use for DR reference)
+    gt_vel : (T, 2)  float32   [vx_gt, vy_gt] m/s
+    t      : (T,)    float32   seconds from flight start
+    dt     : (T,)    float32   seconds since previous sample, dt[0] = 0
+    meta   : dict              optional source-stamp diagnostics
     """
     chunks = sorted(DATA_DIR.glob(f'marid_eskf_gt_{fid}_chunk*.npz'))
     if not chunks:
         raise FileNotFoundError(f'No chunks found for {fid} in {DATA_DIR}')
 
     feat_parts, eskf_parts, gt_pos_parts, gt_yaw_parts, gt_vel_parts = [], [], [], [], []
+    t_parts, dt_parts, time_sources = [], [], set()
+    eskf_stamp_parts, gt_stamp_parts = [], []
     for p in chunks:
         d    = np.load(p, allow_pickle=True)
         eskf = d['eskf_inputs'].astype(np.float32)
         gt   = d['pose_targets'].astype(np.float32)   # (N, 7): [x,y,roll,pitch,yaw,vx,vy]
+        n    = len(eskf)
+        t_chunk, dt_chunk, time_source = _chunk_timebase(d, n)
 
         feat_parts.append(_augment_eskf_inputs(eskf, d))
         eskf_parts.append(eskf)
         gt_pos_parts.append(gt[:, 0:2])
         gt_yaw_parts.append(gt[:, 4])
         gt_vel_parts.append(gt[:, 5:7])
+        t_parts.append(t_chunk)
+        dt_parts.append(dt_chunk)
+        time_sources.add(time_source)
+        if 'eskf_stamp_sec' in d and 'gt_stamp_sec' in d:
+            eskf_stamp_parts.append(d['eskf_stamp_sec'].astype(np.float64).ravel()[:n])
+            gt_stamp_parts.append(d['gt_stamp_sec'].astype(np.float64).ravel()[:n])
+
+    dt = np.concatenate(dt_parts)
+    if len(dt):
+        dt[0] = 0.0
+    if len(time_sources) == 1 and 'logged_dt' in time_sources:
+        t = np.concatenate(t_parts)
+        t = (t - t[0]).astype(np.float32)
+    else:
+        # Legacy chunks each start from their own local fallback timebase; rebuild
+        # a single continuous vector after concatenation.
+        t = np.cumsum(dt, dtype=np.float64).astype(np.float32)
+
+    meta = {}
+    if len(eskf_stamp_parts) == len(chunks) and len(gt_stamp_parts) == len(chunks):
+        eskf_stamp = np.concatenate(eskf_stamp_parts)
+        gt_stamp = np.concatenate(gt_stamp_parts)
+        age = eskf_stamp - gt_stamp
+        fresh_gt = np.ones(len(gt_stamp), dtype=bool)
+        if len(gt_stamp) > 1:
+            fresh_gt[1:] = np.abs(np.diff(gt_stamp)) > 1.0e-9
+        meta['eskf_stamp_sec'] = eskf_stamp
+        meta['gt_stamp_sec'] = gt_stamp
+        meta['source_stamp_age_sec'] = age
+        meta['matched_velocity_mask'] = (
+            np.isfinite(age) &
+            (np.abs(age) <= MAX_SOURCE_AGE_SEC) &
+            fresh_gt
+        )
 
     return (np.concatenate(feat_parts),
             np.concatenate(eskf_parts),
             np.concatenate(gt_pos_parts),
             np.concatenate(gt_yaw_parts),
-            np.concatenate(gt_vel_parts))
+            np.concatenate(gt_vel_parts),
+            t,
+            dt,
+            '+'.join(sorted(time_sources)),
+            meta)
 
 
 # ── Model definitions (must match training scripts exactly) ───────────────────
@@ -175,27 +248,27 @@ class VelocityLSTM(nn.Module):
 
 print('Loading models...')
 
-# Attitude FF
-_ff_norm  = np.load(DATA_DIR / 'eskf_attitude_ff_norm.npz')
+# Attitude FF (loaded from data_low_err — not yet retrained on data_sync)
+_ff_norm  = np.load(MODEL_DIR_FF / 'eskf_attitude_ff_norm.npz')
 ff_X_mean = _ff_norm['X_mean'].astype(np.float32)
 ff_X_std  = _ff_norm['X_std'].astype(np.float32)
 ff_y_mean = float(_ff_norm['y_mean'])
 ff_y_std  = float(_ff_norm['y_std'])
 
 att_model = make_attitude_ff()
-att_model.load_state_dict(torch.load(DATA_DIR / 'eskf_attitude_ff.pt', map_location='cpu', weights_only=True))
+att_model.load_state_dict(torch.load(MODEL_DIR_FF / 'eskf_attitude_ff.pt', map_location='cpu', weights_only=True))
 att_model.eval()
 print(f'  Attitude FF loaded  (y_mean={ff_y_mean:.4f} rad, y_std={ff_y_std:.4f} rad)')
 
 # Velocity LSTM
-_vel_norm  = np.load(DATA_DIR / 'eskf_velocity_lstm_norm.npz')
+_vel_norm  = np.load(MODEL_DIR / 'eskf_velocity_lstm_norm.npz')
 vel_X_mean = _vel_norm['X_mean'].astype(np.float32)
 vel_X_std  = _vel_norm['X_std'].astype(np.float32)
 vel_y_mean = _vel_norm['y_mean'].astype(np.float32)   # (2,)
 vel_y_std  = _vel_norm['y_std'].astype(np.float32)    # (2,)
 
 vel_model = VelocityLSTM()
-vel_model.load_state_dict(torch.load(DATA_DIR / 'eskf_velocity_lstm.pt', map_location='cpu', weights_only=True))
+vel_model.load_state_dict(torch.load(MODEL_DIR / 'eskf_velocity_lstm.pt', map_location='cpu', weights_only=True))
 vel_model.eval()
 print(f'  Velocity LSTM loaded (y_mean={vel_y_mean}, y_std={vel_y_std})')
 
@@ -246,8 +319,9 @@ def rotate_velocity(vx: np.ndarray, vy: np.ndarray,
     return c * vx - s * vy, s * vx + c * vy
 
 
-def dead_reckon(pos0: np.ndarray, vx: np.ndarray, vy: np.ndarray) -> np.ndarray:
-    """Euler-integrate velocity from pos0 at 50 Hz.
+def dead_reckon(pos0: np.ndarray, vx: np.ndarray, vy: np.ndarray,
+                dt: np.ndarray) -> np.ndarray:
+    """Euler-integrate velocity from pos0 using per-sample dt.
 
     Returns position array (T, 2) where pos[0] == pos0.
     """
@@ -255,8 +329,8 @@ def dead_reckon(pos0: np.ndarray, vx: np.ndarray, vy: np.ndarray) -> np.ndarray:
     pos = np.empty((T, 2), dtype=np.float32)
     pos[0] = pos0
     for t in range(1, T):
-        pos[t, 0] = pos[t-1, 0] + vx[t-1] * DT
-        pos[t, 1] = pos[t-1, 1] + vy[t-1] * DT
+        pos[t, 0] = pos[t-1, 0] + vx[t-1] * dt[t]
+        pos[t, 1] = pos[t-1, 1] + vy[t-1] * dt[t]
     return pos
 
 
@@ -267,10 +341,32 @@ def eval_flight(fid: str) -> dict:
     print(f'Flight: {fid}')
     print(f'{"─"*60}')
 
-    feat, eskf, gt_pos, gt_yaw, gt_vel = load_flight(fid)
+    feat, eskf, gt_pos, gt_yaw, gt_vel, t_sec, dt_sec, time_source, meta = load_flight(fid)
     T         = len(feat)
-    duration  = T * DT
+    duration  = float(t_sec[-1]) if T else 0.0
     print(f'  Steps: {T:,}  ({duration/60:.1f} min)')
+    print(f'  Timebase: {time_source}  (median dt={np.median(dt_sec[dt_sec > 0]):.5f}s)')
+    source_age_stats = None
+    if 'source_stamp_age_sec' in meta:
+        age = meta['source_stamp_age_sec']
+        finite_age = age[np.isfinite(age)]
+        if len(finite_age):
+            source_age_stats = {
+                'mean_sec': float(np.mean(finite_age)),
+                'median_sec': float(np.median(finite_age)),
+                'p95_abs_sec': float(np.percentile(np.abs(finite_age), 95)),
+                'max_abs_sec': float(np.max(np.abs(finite_age))),
+            }
+            print('  Source age ESKF-GT: '
+                  f"mean={source_age_stats['mean_sec']*1000:+.1f} ms, "
+                  f"median={source_age_stats['median_sec']*1000:+.1f} ms, "
+                  f"p95|age|={source_age_stats['p95_abs_sec']*1000:.1f} ms, "
+                  f"max|age|={source_age_stats['max_abs_sec']*1000:.1f} ms")
+    vel_metric_mask = meta.get('matched_velocity_mask', np.ones(T, dtype=bool))
+    if len(vel_metric_mask) != T or not np.any(vel_metric_mask):
+        vel_metric_mask = np.ones(T, dtype=bool)
+    print(f'  Velocity RMSE rows: {int(np.sum(vel_metric_mask)):,}/{T:,} '
+          f'({100*np.mean(vel_metric_mask):.1f}%)')
 
     yaw_eskf = eskf[:, 5]
     vx_eskf  = eskf[:, 6]
@@ -293,15 +389,14 @@ def eval_flight(fid: str) -> dict:
     vy_C = vy_eskf + dvel[:, 1]
 
     # ── Dead reckoning (GPS-denied scenario) ─────────────────────────────────
-    # IMPORTANT: gt_pos is published at ~10-17 Hz (3-9 identical rows at 50 Hz
-    # logging rate). Comparing ∫eskf_vel against raw gt_pos inflates error ~4×.
-    # Correct reference: integrate gt_vel from the same starting point (pos0).
-    # Both dead-reckoned trajectories then share the same physics.
+    # Integrate all velocity traces with the same per-sample timing. Compare
+    # against Gazebo gt_pos directly; gt_pos may be held between Gazebo updates,
+    # but it is the absolute reference and avoids trusting odom twist scaling.
     pos0       = gt_pos[0]
-    pos_gt_dr  = dead_reckon(pos0, gt_vel[:, 0], gt_vel[:, 1])   # GT DR reference
-    pos_A      = dead_reckon(pos0, vx_eskf, vy_eskf)
-    pos_B      = dead_reckon(pos0, vx_B,    vy_B)
-    pos_C      = dead_reckon(pos0, vx_C,    vy_C)
+    pos_ref    = gt_pos
+    pos_A      = dead_reckon(pos0, vx_eskf, vy_eskf, dt_sec)
+    pos_B      = dead_reckon(pos0, vx_B,    vy_B,    dt_sec)
+    pos_C      = dead_reckon(pos0, vx_C,    vy_C,    dt_sec)
 
     # ── ESKF sensor-fusion position RMSE vs Gazebo gt_pos ────────────────────
     # gt_pos is subsampled (~10-17 Hz) but still a valid absolute reference for
@@ -309,18 +404,19 @@ def eval_flight(fid: str) -> dict:
     eskf_pos_rmse = float(np.sqrt(np.mean(np.sum((eskf_pos - gt_pos)**2, axis=1))))
 
     # ── Yaw RMSE ─────────────────────────────────────────────────────────────
-    yaw_err_A = np.degrees(np.abs(_wrap(yaw_eskf - gt_yaw)))
-    yaw_err_B = np.degrees(np.abs(_wrap(yaw_corr  - gt_yaw)))
+    yaw_err_A = np.degrees(np.abs(_wrap(yaw_eskf[vel_metric_mask] - gt_yaw[vel_metric_mask])))
+    yaw_err_B = np.degrees(np.abs(_wrap(yaw_corr[vel_metric_mask]  - gt_yaw[vel_metric_mask])))
 
     yaw_rmse_A = float(np.sqrt(np.mean(yaw_err_A**2)))
     yaw_rmse_B = float(np.sqrt(np.mean(yaw_err_B**2)))
 
     # ── Velocity RMSE ────────────────────────────────────────────────────────
     def vel_rmse(vx_est, vy_est):
-        evx   = float(np.sqrt(np.mean((gt_vel[:, 0] - vx_est)**2)))
-        evy   = float(np.sqrt(np.mean((gt_vel[:, 1] - vy_est)**2)))
-        ecomb = float(np.sqrt(np.mean((gt_vel[:, 0] - vx_est)**2 +
-                                      (gt_vel[:, 1] - vy_est)**2)))
+        m = vel_metric_mask
+        evx   = float(np.sqrt(np.mean((gt_vel[m, 0] - vx_est[m])**2)))
+        evy   = float(np.sqrt(np.mean((gt_vel[m, 1] - vy_est[m])**2)))
+        ecomb = float(np.sqrt(np.mean((gt_vel[m, 0] - vx_est[m])**2 +
+                                      (gt_vel[m, 1] - vy_est[m])**2)))
         return evx, evy, ecomb
 
     vrmse_A = vel_rmse(vx_eskf, vy_eskf)
@@ -329,34 +425,28 @@ def eval_flight(fid: str) -> dict:
 
     # ── Position error vs GT dead-reckoning reference ─────────────────────────
     def pos_err_at(pos_est, t_sec):
-        """Euclidean position error vs pos_gt_dr at t_sec from start [m]."""
-        idx = min(int(t_sec / DT), T - 1)
-        return float(np.linalg.norm(pos_est[idx] - pos_gt_dr[idx]))
+        """Euclidean position error vs Gazebo gt_pos at t_sec from start [m]."""
+        idx = min(int(np.searchsorted(t_sec_array, t_sec, side='left')), T - 1)
+        return float(np.linalg.norm(pos_est[idx] - pos_ref[idx]))
 
     def pos_rmse_full(pos_est):
-        return float(np.sqrt(np.mean(np.sum((pos_est - pos_gt_dr)**2, axis=1))))
+        return float(np.sqrt(np.mean(np.sum((pos_est - pos_ref)**2, axis=1))))
 
-    def drift_rate(pos_est):
-        """Linear fit on Euclidean error vs ∫gt_vel → drift rate [m/min]."""
-        err   = np.linalg.norm(pos_est - pos_gt_dr, axis=1)
-        t_m   = np.arange(T) * DT / 60.0
-        slope, _ = np.polyfit(t_m, err, 1)
-        return float(max(slope, 0.0))
+    t_sec_array = t_sec.astype(np.float64)
 
     snapshots = {}
     for cfg_name, pos_est in [('A', pos_A), ('B', pos_B), ('C', pos_C)]:
         snaps = {f'{t}s': pos_err_at(pos_est, t) for t in SNAPSHOT_TIMES}
-        snaps['end']                  = pos_err_at(pos_est, duration)
-        snaps['rmse_full']            = pos_rmse_full(pos_est)
-        snaps['drift_rate_m_per_min'] = drift_rate(pos_est)
+        snaps['end']       = pos_err_at(pos_est, duration)
+        snaps['rmse_full'] = pos_rmse_full(pos_est)
         snapshots[cfg_name] = snaps
 
-    # Theoretical upper bound: velocity RMSE × total time
+    # Velocity RMSE × duration gives a rough scale for possible accumulated error.
     theoretical_max = vrmse_A[2] * duration
 
     # ── Print per-flight summary ──────────────────────────────────────────────
     print(f'\n  ESKF sensor-fusion position RMSE: {eskf_pos_rmse:.2f} m  (vs Gazebo gt_pos)')
-    print(f'  Dead-reckoning bound: {theoretical_max:.1f} m  '
+    print(f'  Velocity-error accumulation scale: {theoretical_max:.1f} m  '
           f'(= {vrmse_A[2]:.3f} m/s × {duration:.0f} s)')
 
     print(f'\n  Yaw RMSE:')
@@ -370,18 +460,22 @@ def eval_flight(fid: str) -> dict:
     print(f'    C  + Vel LSTM(raw): {vrmse_C[0]:.3f}  {vrmse_C[1]:.3f}  {vrmse_C[2]:.3f} m/s  '
           f'({100*(vrmse_A[2]-vrmse_C[2])/vrmse_A[2]:+.1f}%)')
 
-    print(f'\n  Dead-reckoning error vs ∫gt_vel (velocity-bounded reference):')
+    print(f'\n  Dead-reckoning error vs Gazebo gt_pos:')
     hdr = f'    {"Config":<22}' + ''.join(f'{t}s'.rjust(8) for t in SNAPSHOT_TIMES) \
-          + '  End(m)  RMSE(m)  Drift(m/min)'
+          + '  End(m)  RMSE(m)'
     print(hdr)
     for cfg, label in [('A', 'A  ESKF only'), ('B', 'B  + Yaw FF'), ('C', 'C  + Vel LSTM(raw)')]:
         s    = snapshots[cfg]
         cols = ''.join(f'{s[f"{t}s"]:7.1f} ' for t in SNAPSHOT_TIMES)
-        print(f'    {label:<22}{cols}  {s["end"]:6.1f}   {s["rmse_full"]:6.1f}   '
-              f'{s["drift_rate_m_per_min"]:.2f}')
+        print(f'    {label:<22}{cols}  {s["end"]:6.1f}   {s["rmse_full"]:6.1f}')
 
     return {
         'duration_min':    duration / 60.0,
+        'time_source':     time_source,
+        'median_dt_s':     float(np.median(dt_sec[dt_sec > 0])) if np.any(dt_sec > 0) else 0.0,
+        'source_age_stats': source_age_stats,
+        'velocity_rmse_rows': int(np.sum(vel_metric_mask)),
+        'velocity_rmse_row_fraction': float(np.mean(vel_metric_mask)),
         'eskf_pos_rmse_m': eskf_pos_rmse,
         'yaw_rmse_deg':    {'A': yaw_rmse_A, 'B': yaw_rmse_B},
         'vel_rmse_mps': {
@@ -391,9 +485,10 @@ def eval_flight(fid: str) -> dict:
         },
         'pos_snapshots': snapshots,
         '_arrays': {
-            'T': T, 'gt_pos': gt_pos, 'gt_vel': gt_vel,
+            'T': T, 't_sec': t_sec, 'dt_sec': dt_sec,
+            'gt_pos': gt_pos, 'gt_vel': gt_vel,
             'eskf_pos':  eskf_pos,             # sensor-fusion position
-            'pos_gt_dr': pos_gt_dr,            # ∫gt_vel — correct DR reference
+            'pos_ref': pos_ref,                # Gazebo absolute position reference
             'pos_A': pos_A, 'pos_B': pos_B, 'pos_C': pos_C,
             'vx_A': vx_eskf, 'vy_A': vy_eskf,
             'vx_B': vx_B,    'vy_B': vy_B,
@@ -443,17 +538,6 @@ for cfg in configs:
     print(f'  {labels[cfg]}: {np.mean(vals):.3f} ± {np.std(vals):.3f} m/s  '
           f'({np.mean(imp):+.1f}% vs A)')
 
-print('\nPosition drift rate (m/min):')
-for cfg in configs:
-    vals = [r['pos_snapshots'][cfg]['drift_rate_m_per_min'] for r in results.values()]
-    imp  = [(r['pos_snapshots']['A']['drift_rate_m_per_min'] -
-             r['pos_snapshots'][cfg]['drift_rate_m_per_min'])
-            / max(r['pos_snapshots']['A']['drift_rate_m_per_min'], 1e-3) * 100
-            for r in results.values()]
-    print(f'  {labels[cfg]}: {np.mean(vals):.2f} ± {np.std(vals):.2f} m/min  '
-          f'({np.mean(imp):+.1f}% vs A)')
-
-
 # ── Save JSON (strip _arrays before serialising) ──────────────────────────────
 
 def _serialise(r):
@@ -472,24 +556,21 @@ fig, axes = plt.subplots(n_flights, 3, figsize=(18, 6 * n_flights))
 if n_flights == 1:
     axes = axes[np.newaxis, :]
 
-W = int(10.0 / DT)    # 10-second rolling window
-
 for row, (fid, res) in enumerate(results.items()):
     arr       = res['_arrays']
     T         = arr['T']
-    t_min     = np.arange(T) * DT / 60.0
+    t_min     = arr['t_sec'] / 60.0
+    median_dt = max(float(res.get('median_dt_s', DT)), 1.0e-6)
+    W         = max(1, int(10.0 / median_dt))    # 10-second rolling window
     gt_p      = arr['gt_pos']
     gt_v      = arr['gt_vel']
     eskf_p    = arr['eskf_pos']
-    pos_gt_dr = arr['pos_gt_dr']
+    pos_ref   = arr['pos_ref']
 
     # ── Col 0: XY — GT vs ESKF sensor-fusion (actual flight footprint) ─────────
     # Dead-reckoned paths (pos_A/B/C) are NOT shown here.
-    # Although velocity is world-frame, the drone's circuit/back-and-forth pattern
-    # means total path length ≈ 3.9× net displacement. Integrating velocity traces
-    # ~70 km of path over 29 min while the GT footprint is ~4×3 km — incompatible
-    # scales that make XY overlay meaningless.
-    # GPS-denied navigation quality is shown correctly in Col 2 (error vs time).
+    # Dead-reckoned paths are omitted here so the absolute sensor-fusion footprint
+    # stays readable. GPS-denied navigation quality is shown in Col 2.
     ax = axes[row, 0]
     ax.plot(gt_p[:, 0],   gt_p[:, 1],   'k-',  lw=1.8,
             label='GT  (Gazebo pos)', alpha=0.85)
@@ -512,18 +593,17 @@ for row, (fid, res) in enumerate(results.items()):
     ax.set_title('Velocity error — 10 s rolling mean\nA vs B (+Yaw FF) vs C (+Vel LSTM)')
     ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
 
-    # ── Col 2: GPS-denied dead-reckoning error vs ∫gt_vel ──────────────────────
+    # ── Col 2: GPS-denied dead-reckoning error vs Gazebo gt_pos ────────────────
     # pos_A/B/C all start at gt_pos[0] and integrate their respective velocities.
-    # Reference = pos_gt_dr = ∫gt_vel (same integration, ideal velocity).
-    # Error is therefore bounded by velocity RMSE × T (consistent with Col 1).
+    # Reference = held Gazebo gt_pos, which may update slower than the logger.
     ax = axes[row, 2]
     for cfg, pk in [('A', 'pos_A'), ('B', 'pos_B'), ('C', 'pos_C')]:
-        err = np.linalg.norm(arr[pk] - pos_gt_dr, axis=1)
-        dr  = res['pos_snapshots'][cfg]['drift_rate_m_per_min']
+        err = np.linalg.norm(arr[pk] - pos_ref, axis=1)
+        rmse = res['pos_snapshots'][cfg]['rmse_full']
         ax.plot(t_min, err, color=colors[cfg], lw=0.9,
-                label=f'{cfg}  {dr:.0f} m/min drift')
+                label=f'{cfg}  RMSE={rmse:.1f} m')
     ax.set_xlabel('Time (min)'); ax.set_ylabel('Dead-reckoning error (m)')
-    ax.set_title('GPS-denied DR error vs ∫gt_vel\n(velocity-bounded — path length ≈ 3.9× displacement)')
+    ax.set_title('GPS-denied DR error vs Gazebo gt_pos\n(timing-aware when logged dt is available)')
     ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
 
 plt.suptitle('MARID ESKF Cascade Correction Evaluation\n'

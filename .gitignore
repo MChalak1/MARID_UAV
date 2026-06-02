@@ -208,3 +208,5 @@ data/*.json
 data_extended/*.npz
 data_extended/*.pt
 data_extended/*.json
+data_sync/
+data_low_err/

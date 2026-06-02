@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from collections import defaultdict
 
-DATA_FOLDER = 'data_extended'   # 'data' → 15-col base;  'data_extended' → 24-col rich
+DATA_FOLDER = 'data_sync'       # clean timestamp-synchronised velocity-training corpus
 DATA_DIR  = Path(f'~/marid_ws/{DATA_FOLDER}').expanduser()
 CHUNK_LEN = 300  # TBPTT chunk length (6s at 50 Hz)
 
@@ -43,13 +43,22 @@ EARLY_STOP_PATIENCE = 100
 VAL_MSE_TARGET      = 0.0
 INCLUDE_MIRRORED    = True   # include logger-saved _mirror flights in train (never in val)
 VAL_FLIGHTS         = [                            # cold-start held-out flights (never seen during training)
-    'flight_20260521_211150',                      # oldest session — temporal shift; 2D spread; 8.9 min; yaw 4.9°
-    'flight_20260522_062211',                      # mid-period — 2D spread (2546×2365 m); 14.6 min; yaw 4.8°
-    'flight_20260523_090404',                      # longest flight (29.1 min); max drift stress; yaw 3.7°
+    'flight_20260531_075734',
+    'flight_20260601_082638',
 ]
 
 LABELS = ['Δvx (m/s)', 'Δvy (m/s)']
 MIN_FLIGHT_STEPS = 2 * CHUNK_LEN
+
+# Timestamp-aware velocity pairing:
+#   - New logs: keep only rows where ESKF and GT source stamps are close, and
+#     the GT stamp is fresh instead of a held/repeated sample.
+#   - Old logs: approximate this by dropping repeated GT-position rows.
+# This changes only preprocessing; feature/target column indices are unchanged.
+USE_TIMESTAMP_MATCHING       = True
+MAX_SOURCE_AGE_SEC           = 0.030
+REQUIRE_FRESH_GT_STAMP       = True
+LEGACY_DROP_REPEATED_GT_POSE = True
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
@@ -61,7 +70,7 @@ def _augment_eskf_inputs(eskf: np.ndarray, d) -> np.ndarray:
     """Augment the 12-col ESKF input.
 
     data mode        → 15 cols: base(12) + thrust + ground_flag + psi_dot_aero
-    data_extended    → 23 cols: above(15) + imu_acc(3) + a_excess + yaw_madgwick + airspeed
+    rich logs       → 23 cols: above(15) + imu_acc(3) + a_excess + yaw_madgwick + airspeed
                                 + delta_yaw_sun*sun_valid + sun_valid
 
     imu_acc preprocessing:
@@ -82,7 +91,7 @@ def _augment_eskf_inputs(eskf: np.ndarray, d) -> np.ndarray:
     vx, vy      = eskf[:, 6], eskf[:, 7]
     ground_flag = (z < 1.0).astype(np.float32)
 
-    if DATA_FOLDER == 'data_extended' and 'airspeed' in d:
+    if DATA_FOLDER in ('data_low_err', 'data_sync') and 'airspeed' in d:
         V_src = np.clip(np.abs(d['airspeed'].astype(np.float32).ravel()[:N]), _MIN_V, None)
     else:
         V_src = np.clip(np.sqrt(vx**2 + vy**2), _MIN_V, None)
@@ -92,7 +101,7 @@ def _augment_eskf_inputs(eskf: np.ndarray, d) -> np.ndarray:
 
     base = np.concatenate([eskf, thrust[:, None], ground_flag[:, None], psi_dot[:, None]], axis=1)
 
-    if DATA_FOLDER != 'data_extended' or 'imu_acc' not in d:
+    if DATA_FOLDER not in ('data_low_err', 'data_sync') or 'imu_acc' not in d:
         return base   # 15 cols
 
     def _wrap(a): return ((a + np.pi) % (2 * np.pi) - np.pi).astype(np.float32)
@@ -122,6 +131,42 @@ def _load_vxy(d):
     eskf = d['eskf_inputs'].astype(np.float32)   # col 6=vx_est, 7=vy_est
     gt   = d['pose_targets'].astype(np.float32)  # col 5=vx_gt,  6=vy_gt
     return gt[:, 5:7] - eskf[:, 6:8]
+
+def _fresh_sample_mask(d, n: int):
+    """Return a mask that keeps one time-aligned sample per fresh GT update."""
+    if not USE_TIMESTAMP_MATCHING:
+        return np.ones(n, dtype=bool), 'all_rows'
+
+    if 'eskf_stamp_sec' in d and 'gt_stamp_sec' in d:
+        eskf_stamp = d['eskf_stamp_sec'].astype(np.float64).ravel()[:n]
+        gt_stamp = d['gt_stamp_sec'].astype(np.float64).ravel()[:n]
+        age = eskf_stamp - gt_stamp
+        mask = np.isfinite(age) & (np.abs(age) <= MAX_SOURCE_AGE_SEC)
+        mode = f'stamped_age<={MAX_SOURCE_AGE_SEC*1000:.0f}ms'
+        if REQUIRE_FRESH_GT_STAMP:
+            fresh_gt = np.ones(n, dtype=bool)
+            if n > 1:
+                fresh_gt[1:] = np.abs(np.diff(gt_stamp)) > 1.0e-9
+            mask &= fresh_gt
+            mode += '+fresh_gt'
+        return mask, mode
+
+    if LEGACY_DROP_REPEATED_GT_POSE and 'pose_targets' in d:
+        gt = d['pose_targets'].astype(np.float32)
+        mask = np.ones(n, dtype=bool)
+        if n > 1:
+            dpos = np.linalg.norm(np.diff(gt[:, 0:2], axis=0), axis=1)
+            mask[1:] = dpos > 1.0e-7
+        return mask, 'legacy_fresh_gt_pos'
+
+    return np.ones(n, dtype=bool), 'legacy_all_rows'
+
+def _filter_summary(meta):
+    kept = meta['kept_steps']
+    original = meta['original_steps']
+    pct = 100.0 * kept / max(original, 1)
+    modes = ','.join(f'{k}:{v}' for k, v in sorted(meta['modes'].items()))
+    return f'{kept} kept / {original} raw ({pct:.1f}%, {modes})'
 
 try:
     file_list = list(uploaded.keys())  # Colab
@@ -159,7 +204,7 @@ print(f'Found {len(flight_groups)} new-format flight(s), {len(legacy_files)} leg
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 
-INPUT_DIM = 23 if DATA_FOLDER == 'data_extended' else 15
+INPUT_DIM = 23 if DATA_FOLDER in ('data_low_err', 'data_sync') else 15
 
 class VelocityLSTM(nn.Module):
     def __init__(self, input_dim=INPUT_DIM, hidden_dim=128, num_layers=2, output_dim=2):
@@ -302,14 +347,35 @@ def plot_losses(train_losses, val_losses, title):
 
 def load_flight(chunk_paths):
     eskf_parts, dv_parts = [], []
+    original_steps = 0
+    mode_counts = defaultdict(int)
     for p in chunk_paths:
         d = np.load(p, allow_pickle=True)
-        eskf = _augment_eskf_inputs(d['eskf_inputs'].astype(np.float32), d)
+        raw_eskf = d['eskf_inputs'].astype(np.float32)
+        n = len(raw_eskf)
+        original_steps += n
+        mask, mode = _fresh_sample_mask(d, n)
+        mode_counts[mode] += 1
+        if not np.any(mask):
+            continue
+        eskf = _augment_eskf_inputs(raw_eskf, d)[mask]
         eskf_parts.append(eskf)
-        dv_parts.append(_load_vxy(d))
+        dv_parts.append(_load_vxy(d)[mask])
+    if not eskf_parts:
+        empty_x = np.empty((0, INPUT_DIM), dtype=np.float32)
+        empty_y = np.empty((0, 2), dtype=np.float32)
+        return empty_x, empty_y, {
+            'original_steps': original_steps,
+            'kept_steps': 0,
+            'modes': dict(mode_counts),
+        }
     eskf_seq  = np.concatenate(eskf_parts, axis=0)
     delta_seq = np.concatenate(dv_parts,   axis=0)
-    return eskf_seq, delta_seq
+    return eskf_seq, delta_seq, {
+        'original_steps': original_steps,
+        'kept_steps': len(eskf_seq),
+        'modes': dict(mode_counts),
+    }
 
 # ── Per-flight training ───────────────────────────────────────────────────────
 
@@ -317,16 +383,16 @@ if TRAIN_PER_FLIGHT:
     summary = []
 
     for fid, chunk_paths in sorted(flight_groups.items()):
-        eskf_seq, delta_seq = load_flight(chunk_paths)
+        eskf_seq, delta_seq, meta = load_flight(chunk_paths)
         N = len(eskf_seq)
 
         if N < MIN_FLIGHT_STEPS:
-            print(f'\n── {fid}: {N} steps — too short, skipping ──')
+            print(f'\n── {fid}: {_filter_summary(meta)} — too short, skipping ──')
             continue
 
         split = int(0.8 * N)
         print(f'\n{"─"*60}')
-        print(f'Flight: {fid}  ({N} steps → {split} train / {N-split} val)')
+        print(f'Flight: {fid}  ({_filter_summary(meta)} → {split} train / {N-split} val)')
         print(f'{"─"*60}')
 
         X_mean = eskf_seq[:split].mean(axis=0);  X_std = eskf_seq[:split].std(axis=0);   X_std[X_std < 1e-8] = 1.0
@@ -383,9 +449,9 @@ else:
     val_seqs   = []
 
     if legacy_files:
-        eskf_seq, delta_seq = load_flight(legacy_files)
+        eskf_seq, delta_seq, meta = load_flight(legacy_files)
         train_seqs.append((eskf_seq, delta_seq))
-        print(f'  Legacy: {len(eskf_seq)} steps → train only')
+        print(f'  Legacy: {_filter_summary(meta)} → train only')
 
     val_fids = []
     for fid, chunk_paths in flight_groups.items():
@@ -396,24 +462,24 @@ else:
         if VAL_FLIGHTS and any(fid.startswith(v) and '_mirror' in fid for v in VAL_FLIGHTS):
             print(f'  {fid}: excluded (mirror of val flight)')
             continue
-        eskf_seq, delta_seq = load_flight(chunk_paths)
+        eskf_seq, delta_seq, meta = load_flight(chunk_paths)
         N = len(eskf_seq)
         if VAL_FLIGHTS and fid in VAL_FLIGHTS:
             # Cold-start val: split=0 → no warm-up, model sees this flight fresh
             val_seqs.append((eskf_seq, delta_seq, 0))
             val_fids.append(fid)
-            print(f'  {fid}: {N} steps → VAL FLIGHT (cold-start, held out entirely)')
+            print(f'  {fid}: {_filter_summary(meta)} → VAL FLIGHT (cold-start, held out entirely)')
         elif is_mirror or N < MIN_FLIGHT_STEPS:
             train_seqs.append((eskf_seq, delta_seq))
             tag = 'mirror, train only' if is_mirror else 'train only (too short to split)'
-            print(f'  {fid}: {N} steps → {tag}')
+            print(f'  {fid}: {_filter_summary(meta)} → {tag}')
         else:
             split = int(0.8 * N) if not VAL_FLIGHTS else N
             train_seqs.append((eskf_seq[:split], delta_seq[:split]))
             if not VAL_FLIGHTS:
                 val_seqs.append((eskf_seq, delta_seq, split))
                 val_fids.append(fid)
-            print(f'  {fid}: {N} steps → {"train" if VAL_FLIGHTS else f"{split} train, {N-split} val"}')
+            print(f'  {fid}: {_filter_summary(meta)} → {"train" if VAL_FLIGHTS else f"{split} train, {N-split} val"}')
 
     all_train_eskf  = np.concatenate([s[0] for s in train_seqs], axis=0)
     all_train_delta = np.concatenate([s[1] for s in train_seqs], axis=0)

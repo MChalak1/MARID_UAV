@@ -221,6 +221,7 @@ marid_odom_node:
     # Thrust command timeout [s].  If no thrust message arrives within this period,
     # thrust is set to zero (safe default: no phantom drag subtraction).
     thrust_timeout: 0.5
+    debug_cap_thrust: 0.0      # diagnostic: cap thrust fed to predict_physics only (N); 0 = disabled
 
     # --- Hydrogen fuel-mass tracking ---
     track_h2_mass: true
@@ -268,6 +269,11 @@ marid_odom_node:
     # Lower than eskf_r_vel: pitot is cleaner than optical flow.
     # Calibrated: 0.05 (raised from 0.025 — mild heading-pitch cross-coupling).
     eskf_r_vel_airspeed: 0.05
+
+    # Diagnostic: cap airspeed fed to ESKF (update_airspeed_world_velocity +
+    # update_coordinated_turn). Real airspeed still published and logged.
+    # Set to 0.0 to disable. Use 13.0 to test speed-coupling hypothesis.
+    debug_cap_airspeed: 0.0    # disabled — testing thrust cap instead
 
     # Zero-sideslip lateral constraint noise [(m/s)²].
     # Loose: sideslip is small but non-zero in turns; overly tight here biases vy.
@@ -407,13 +413,28 @@ marid_odom_node:
     sun_elevation_topic: "/sun_sensor/sun_elevation_deg"
 
     # Sun sensor yaw measurement noise [rad²].
-    # R=0.004 (~3.6° 1-sigma): gate threshold = sqrt(3.841*(P_yaw+R)).
-    # At liftoff with P_yaw small: threshold ≈8–10° → rejects the ~18° systematic
-    # calibration offset (liftoff snap fix).  As P_yaw grows in flight the gate opens
-    # (P_yaw=0.01 → 13°; P_yaw=0.1 → 36°) so sun can still recover from divergence.
-    # History: 0.0085 → 0.0025 (2026-05-21) → 0.0005 (2026-05-22) → 0.0025 (2026-05-26) ,
-    # restored gate + widened R; gate=False workaround removed).
+    # 1-sigma = sqrt(0.001) ≈ 1.8°.  Sun sensor validated at ≈−0.01° vs GT.
+    # Gate is now a FIXED outlier threshold (sun_outlier_gate_deg), not chi-squared,
+    # so R only controls the Kalman gain, not the acceptance window.
+    # History: 0.0085 → 0.0025 (2026-05-21) → 0.001 (2026-05-27)
     eskf_r_yaw_sun: 0.001
+
+    # Fixed outlier gate [deg] for sun heading innovation.
+    # Replaces the P-adaptive chi-squared gate which blocked corrections > ~4-7°
+    # when P_yaw was tight, causing a stable +6-8° cruise yaw bias at V=25-30 m/s.
+    # Flight analysis (20260528): sun sensor has ±4.6° per-sample noise; even at T=5000N
+    # with propeller-driven 1.89°/s physical yaw, 99.5% of updates pass at gate=45°
+    # vs only 65% at gate=7° and 86% at gate=25°.  Raising to 45° prevents runaway:
+    # a 34° ESKF divergence (observed end-of-flight) would still be corrected.
+    # Only obvious sensor computation failures (>45°) are rejected.
+    sun_outlier_gate_deg: 45.0
+
+    # Propeller reaction-torque feedforward [rad/(s·N)].
+    # Subtracts the systematic body-z rate from the aft pusher propeller before ESKF
+    # integration.  Leaves bg_r representing only true electronic gyro bias.
+    # Offline calibration: k_tau_cal ≈ 6.58e-6 rad/(s·N).  Sign: positive adds ω_z.
+    # Set to 0.0 to disable (default — tune sign empirically before enabling).
+    propeller_torque_ff: 0.0
 
     # Minimum solar elevation [deg] for sun sensor to be considered valid.
     # Below 10° the ephemeris projection onto the body frame is geometry-noisy.

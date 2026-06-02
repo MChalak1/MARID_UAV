@@ -33,11 +33,12 @@ from pathlib import Path
 from collections import defaultdict
 
 # ── Dataset selection ─────────────────────────────────────────────────────────
-# USE_EXTENDED=False → data/ (12-col base ESKF inputs, many old flights)
-# USE_EXTENDED=True  → data_extended/ (23-col enriched: imu_acc, a_excess, yaw sources, airspeed)
-#   Switch to True once ≥8 data_extended flights are available for a meaningful val set.
-USE_EXTENDED = True
-DATA_FOLDER  = 'data_extended' if USE_EXTENDED else 'data'
+# DATA_FOLDER options:
+#   data          → old 12-col base ESKF inputs
+#   data_extended → 23-col enriched: imu_acc, a_excess, yaw sources, airspeed
+#   data_low_err  → recent low-error corpus with enriched arrays
+DATA_FOLDER  = 'data_low_err'
+USE_EXTENDED = DATA_FOLDER in ('data_extended', 'data_low_err')
 DATA_DIR     = Path(f"~/marid_ws/{DATA_FOLDER}").expanduser()
 
 _G        = 9.81
@@ -55,9 +56,7 @@ INCLUDE_MIRRORED    = True   # include logger-saved _mirror flights in train (ne
 USE_AUTOREGRESSIVE  = False  # True → append Δ_{t-1} to LSTM input (input_dim+2);
                               # False → augmented ESKF state only
 VAL_FLIGHTS         = [                            # hold these flights out as cold-start val;
-    "flight_20260521_211150",  # oldest session — temporal distribution shift; 2D spread (1041×1304 m); 8.9 min; yaw 4.9°
-    "flight_20260522_062211",  # mid-period — 2D spread (2546×2365 m); 14.6 min; yaw 4.8°
-    "flight_20260523_090404",  # longest flight (29.1 min); 2D spread (4136×3180 m); max drift stress; yaw 3.7°
+    "flight_20260529_105242",
 ]                                                  # mirrors of all val flights excluded from train
 
 _VAL_TIMESTAMPS = [v.replace('flight_', '') for v in VAL_FLIGHTS]  # for prefix-agnostic mirror exclusion
@@ -71,7 +70,8 @@ def _augment_eskf_inputs(eskf: np.ndarray, d) -> np.ndarray:
     """Augment ESKF inputs — mirrors eskf_velocity_lstm_train._augment_eskf_inputs.
 
     data/          → 15 cols: base(12) + thrust + ground_flag + psi_dot_aero
-    data_extended/ → 23 cols: above(15) + imu_acc(3) + a_excess + delta_yaw_madgwick
+    data_extended/
+    data_low_err/  → 23 cols: above(15) + imu_acc(3) + a_excess + delta_yaw_madgwick
                                + airspeed + delta_yaw_sun*sun_valid + sun_valid
 
     imu_acc preprocessing:
@@ -88,7 +88,7 @@ def _augment_eskf_inputs(eskf: np.ndarray, d) -> np.ndarray:
     vx, vy      = eskf[:, 6], eskf[:, 7]
     ground_flag = (z < 1.0).astype(np.float32)
 
-    if DATA_FOLDER == 'data_extended' and 'airspeed' in d:
+    if DATA_FOLDER in ('data_extended', 'data_low_err') and 'airspeed' in d:
         V_src = np.clip(np.abs(d['airspeed'].astype(np.float32).ravel()[:N]), _MIN_V, None)
     else:
         V_src = np.clip(np.sqrt(vx**2 + vy**2), _MIN_V, None)
@@ -98,7 +98,7 @@ def _augment_eskf_inputs(eskf: np.ndarray, d) -> np.ndarray:
 
     base = np.concatenate([eskf, thrust[:, None], ground_flag[:, None], psi_dot[:, None]], axis=1)
 
-    if DATA_FOLDER != 'data_extended' or 'imu_acc' not in d:
+    if DATA_FOLDER not in ('data_extended', 'data_low_err') or 'imu_acc' not in d:
         return base   # 15 cols
 
     def _wrap(a): return ((a + np.pi) % (2 * np.pi) - np.pi).astype(np.float32)
@@ -507,6 +507,13 @@ else:
                 val_seqs.append((eskf_seq, delta_seq, split))
                 val_fids.append(fid)
             print(f'  {fid}: {N} steps → {"train" if VAL_FLIGHTS else f"{split} train, {N-split} val"}')
+
+    if VAL_FLIGHTS and not val_seqs:
+        available = '\n'.join(f'  {fid}' for fid in sorted(flight_groups))
+        raise ValueError(
+            f'No VAL_FLIGHTS were found in {DATA_DIR}. Requested: {VAL_FLIGHTS}\n'
+            f'Available flights:\n{available}'
+        )
 
     all_train_eskf = np.concatenate([s[0] for s in train_seqs], axis=0)
     X_mean = all_train_eskf.mean(axis=0); X_std = all_train_eskf.std(axis=0); X_std[X_std < 1e-8] = 1.0

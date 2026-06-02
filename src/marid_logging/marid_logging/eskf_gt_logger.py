@@ -7,13 +7,19 @@ Input  (X, 12-D): ESKF state from /marid/odom
     [x, y, z, roll, pitch, yaw, vx, vy, vz, p, q, r]
 Target (y,  7-D): ground-truth pose+velocity from /gazebo/odom
     [x, y, roll, pitch, yaw, vx_world, vy_world]
-    z/vz excluded (barometer-accurate). Gazebo body-frame twist is rotated to world (ENU)
-    to match the world-frame convention of the ESKF inputs.
+    z/vz excluded (barometer-accurate). Gazebo body-frame twist (physics-engine velocity,
+    not finite-differenced) is rotated to world (ENU) to match the ESKF convention.
 Thrust (1-D): actual Gazebo center-thruster command in N from
     /model/marid/joint/thruster_center_joint/cmd_thrust (Float64).
     This captures joystick, Option A after marid_thrust_controller smoothing, and
     manual overrides because they all converge at the Gazebo thruster command.
 Heading sidecars (1-D): horizontal-projected body-forward heading for ESKF and GT.
+Time sidecars:
+    t              (N,): seconds since this flight/logger started
+    dt             (N,): seconds since previous logged sample; dt[0] = 0
+    stamp_ros_sec  (N,): absolute ROS time at the logger tick
+    eskf_stamp_sec (N,): source header stamp from the ESKF odometry message
+    gt_stamp_sec   (N,): source header stamp from the Gazebo GT odometry message
 
 Extended arrays (saved to data_extended only):
     imu_acc    (N, 3): [ax, ay, az] body-frame specific force from /imu
@@ -62,10 +68,9 @@ class ESKFGTLogger(Node):
         self.declare_parameter('sun_azimuth_topic',  '/sun_sensor/sun_azimuth_enu_rad')
         self.declare_parameter('sun_elevation_topic','/sun_sensor/sun_elevation_deg')
         self.declare_parameter('sun_el_min_deg',     10.0)
-        self.declare_parameter('log_directory',      '~/marid_ws/data_extended')
+        self.declare_parameter('log_directory',      '~/marid_ws/data_sync')
         self.declare_parameter('log_filename_prefix','marid_eskf_gt')
         self.declare_parameter('samples_per_file',   10000)
-        self.declare_parameter('log_rate',           50.0)
         self.declare_parameter('enable_logging',     True)
         self.declare_parameter('flight_id',          '')
 
@@ -114,6 +119,11 @@ class ESKFGTLogger(Node):
         self.airspeed_buf_     = []
         self.sun_yaw_buf_      = []
         self.sun_valid_buf_    = []
+        self.t_buf_            = []
+        self.dt_buf_           = []
+        self.stamp_ros_buf_    = []
+        self.eskf_stamp_buf_   = []
+        self.gt_stamp_buf_     = []
 
         # ── Full-flight buffers (for mirror saves) ─────────────────────────
         self.all_eskf_           = []
@@ -126,10 +136,19 @@ class ESKFGTLogger(Node):
         self.all_airspeed_       = []
         self.all_sun_yaw_        = []
         self.all_sun_valid_      = []
+        self.all_t_              = []
+        self.all_dt_             = []
+        self.all_stamp_ros_      = []
+        self.all_eskf_stamp_     = []
+        self.all_gt_stamp_       = []
 
         self.file_counter_  = 0
         self.total_samples_ = 0
         self.start_time_    = time.time()
+        self.first_ros_stamp_     = None
+        self.last_ros_stamp_      = None
+        self.first_gt_stamp_logged_ = None
+        self.last_gt_stamp_logged_ = None   # GT stamp of previous logged sample, for dt
 
         # ── Subscriptions ─────────────────────────────────────────────────
         self.create_subscription(Odometry, self.get_parameter('eskf_topic').value,
@@ -151,10 +170,7 @@ class ESKFGTLogger(Node):
         self.create_subscription(Float64, self.get_parameter('sun_elevation_topic').value,
                                  self._sun_elevation_cb, 10)
 
-        rate = self.get_parameter('log_rate').value
-        self.create_timer(1.0 / rate, self._log)
-
-        self.get_logger().info('ESKF-GT Logger ready (extended mode)')
+        self.get_logger().info('ESKF-GT Logger ready (extended mode, GT-callback driven)')
         self.get_logger().info(f'  Output: {self.log_dir_}  |  Flight: {self.flight_id_}')
 
     # ── Base callbacks ─────────────────────────────────────────────────────
@@ -164,6 +180,7 @@ class ESKFGTLogger(Node):
 
     def _gt_cb(self, msg: Odometry):
         self.last_gt_ = msg
+        self._log()
 
     def _thrust_cb(self, msg: Float64):
         self.last_thrust_ = msg.data
@@ -226,6 +243,11 @@ class ESKFGTLogger(Node):
     # ── Static extractors ──────────────────────────────────────────────────
 
     @staticmethod
+    def _stamp_to_sec(msg: Odometry):
+        stamp = msg.header.stamp
+        return float(stamp.sec) + float(stamp.nanosec) * 1.0e-9
+
+    @staticmethod
     def _odom_to_state(msg: Odometry):
         """Extract [x, y, z, roll, pitch, yaw, vx, vy, vz, p, q, r] from Odometry."""
         p = msg.pose.pose.position
@@ -238,15 +260,19 @@ class ESKFGTLogger(Node):
                          t.angular.x, t.angular.y, t.angular.z], dtype=np.float32)
 
     @staticmethod
-    def _odom_to_pose(msg: Odometry):
+    def _odom_to_pose(msg: Odometry, vel_world=None):
         """Extract [x, y, roll, pitch, yaw, vx_world, vy_world] from Odometry."""
         p = msg.pose.pose.position
         o = msg.pose.pose.orientation
         t = msg.twist.twist
         roll, pitch, yaw = euler_from_quaternion([o.x, o.y, o.z, o.w])
-        cy, sy = math.cos(yaw), math.sin(yaw)
-        vx_world = t.linear.x * cy - t.linear.y * sy
-        vy_world = t.linear.x * sy + t.linear.y * cy
+        if vel_world is not None:
+            vx_world = float(vel_world[0])
+            vy_world = float(vel_world[1])
+        else:
+            cy, sy = math.cos(yaw), math.sin(yaw)
+            vx_world = t.linear.x * cy - t.linear.y * sy
+            vy_world = t.linear.x * sy + t.linear.y * cy
         return np.array([p.x, p.y,
                          roll, pitch, yaw,
                          vx_world, vy_world], dtype=np.float32)
@@ -286,11 +312,29 @@ class ESKFGTLogger(Node):
         if not (np.isfinite(eskf_heading) and np.isfinite(target_heading)):
             return
 
+        stamp_ros  = self.get_clock().now().nanoseconds * 1.0e-9
+        eskf_stamp = self._stamp_to_sec(self.last_eskf_)
+        gt_stamp   = self._stamp_to_sec(self.last_gt_)
+        if self.first_ros_stamp_ is None:
+            self.first_ros_stamp_ = stamp_ros
+            self.first_gt_stamp_logged_ = gt_stamp
+            dt_ros = 0.0
+        else:
+            dt_ros = max(0.0, gt_stamp - self.last_gt_stamp_logged_)
+        self.last_ros_stamp_       = stamp_ros
+        self.last_gt_stamp_logged_ = gt_stamp
+        t_rel = gt_stamp - self.first_gt_stamp_logged_
+
         self.eskf_inputs_.append(eskf_state)
         self.pose_targets_.append(gt_pose)
         self.thrust_buf_.append(np.float32(self.last_thrust_))
         self.eskf_heading_.append(eskf_heading)
         self.target_heading_.append(target_heading)
+        self.t_buf_.append(np.float64(t_rel))
+        self.dt_buf_.append(np.float32(dt_ros))
+        self.stamp_ros_buf_.append(np.float64(stamp_ros))
+        self.eskf_stamp_buf_.append(np.float64(eskf_stamp))
+        self.gt_stamp_buf_.append(np.float64(gt_stamp))
 
         self.imu_acc_buf_.append(self.last_imu_acc_.copy())
         self.yaw_madgwick_buf_.append(np.float32(self.last_yaw_madgwick_))
@@ -303,6 +347,11 @@ class ESKFGTLogger(Node):
         self.all_thrust_.append(np.float32(self.last_thrust_))
         self.all_eskf_heading_.append(eskf_heading)
         self.all_target_heading_.append(target_heading)
+        self.all_t_.append(np.float64(t_rel))
+        self.all_dt_.append(np.float32(dt_ros))
+        self.all_stamp_ros_.append(np.float64(stamp_ros))
+        self.all_eskf_stamp_.append(np.float64(eskf_stamp))
+        self.all_gt_stamp_.append(np.float64(gt_stamp))
         self.all_imu_acc_.append(self.last_imu_acc_.copy())
         self.all_yaw_madgwick_.append(np.float32(self.last_yaw_madgwick_))
         self.all_airspeed_.append(np.float32(self.last_airspeed_))
@@ -324,6 +373,15 @@ class ESKFGTLogger(Node):
             sun_valid     = sun_valid.astype(np.float32),
         )
 
+    def _time_arrays(self, t, dt, stamp_ros, eskf_stamp, gt_stamp):
+        return dict(
+            t             = t.astype(np.float64),
+            dt            = dt.astype(np.float32),
+            stamp_ros_sec = stamp_ros.astype(np.float64),
+            eskf_stamp_sec = eskf_stamp.astype(np.float64),
+            gt_stamp_sec   = gt_stamp.astype(np.float64),
+        )
+
     def _save_chunk(self):
         if not self.eskf_inputs_:
             return
@@ -335,6 +393,13 @@ class ESKFGTLogger(Node):
             thrust       = np.array(self.thrust_buf_,   dtype=np.float32),
             eskf_horizontal_heading   = np.array(self.eskf_heading_,   dtype=np.float32),
             target_horizontal_heading = np.array(self.target_heading_, dtype=np.float32),
+            **self._time_arrays(
+                np.array(self.t_buf_, dtype=np.float64),
+                np.array(self.dt_buf_, dtype=np.float32),
+                np.array(self.stamp_ros_buf_, dtype=np.float64),
+                np.array(self.eskf_stamp_buf_, dtype=np.float64),
+                np.array(self.gt_stamp_buf_, dtype=np.float64),
+            ),
             flight_id    = self.flight_id_,
             input_dim    = 12,
             target_dim   = 7,
@@ -348,7 +413,7 @@ class ESKFGTLogger(Node):
                 np.array(self.sun_valid_buf_),
             ),
         )
-        elapsed = time.time() - self.start_time_
+        elapsed = max(float(self.all_t_[-1]), 1.0e-6) if self.all_t_ else time.time() - self.start_time_
         self.get_logger().info(
             f'Saved {fname}  ({len(self.eskf_inputs_)} samples, '
             f'total: {self.total_samples_},  rate: {self.total_samples_/elapsed:.1f} Hz)'
@@ -358,6 +423,11 @@ class ESKFGTLogger(Node):
         self.thrust_buf_     = []
         self.eskf_heading_   = []
         self.target_heading_ = []
+        self.t_buf_          = []
+        self.dt_buf_         = []
+        self.stamp_ros_buf_  = []
+        self.eskf_stamp_buf_ = []
+        self.gt_stamp_buf_   = []
         self.imu_acc_buf_    = []
         self.yaw_madgwick_buf_ = []
         self.airspeed_buf_   = []
@@ -365,7 +435,7 @@ class ESKFGTLogger(Node):
         self.sun_valid_buf_  = []
         self.file_counter_  += 1
 
-    def _save_flight(self, fid, X, Y, T, Hx, Hy,
+    def _save_flight(self, fid, X, Y, T, Hx, Hy, t, dt, stamp_ros, eskf_stamp, gt_stamp,
                      imu_acc, yaw_madgwick, airspeed, sun_yaw, sun_valid):
         """Write one or more chunk files for a (possibly mirrored) flight array."""
         n   = len(X)
@@ -380,6 +450,7 @@ class ESKFGTLogger(Node):
                 thrust       = T[sl],
                 eskf_horizontal_heading   = Hx[sl],
                 target_horizontal_heading = Hy[sl],
+                **self._time_arrays(t[sl], dt[sl], stamp_ros[sl], eskf_stamp[sl], gt_stamp[sl]),
                 flight_id    = fid,
                 input_dim    = 12,
                 target_dim   = 7,
@@ -405,7 +476,12 @@ class ESKFGTLogger(Node):
         As = np.array(self.all_airspeed_,       dtype=np.float32)
         Syw= np.array(self.all_sun_yaw_,        dtype=np.float32)
         Svl= np.array(self.all_sun_valid_,      dtype=np.float32)
-        return X, Y, T, Hx, Hy, A, Ym, As, Syw, Svl
+        t  = np.array(self.all_t_,              dtype=np.float64)
+        dt = np.array(self.all_dt_,             dtype=np.float32)
+        Rs = np.array(self.all_stamp_ros_,      dtype=np.float64)
+        Es = np.array(self.all_eskf_stamp_,     dtype=np.float64)
+        Gs = np.array(self.all_gt_stamp_,       dtype=np.float64)
+        return X, Y, T, Hx, Hy, t, dt, Rs, Es, Gs, A, Ym, As, Syw, Svl
 
     # ── Mirror saves ───────────────────────────────────────────────────────
 
@@ -413,7 +489,7 @@ class ESKFGTLogger(Node):
         """Left-right mirror: negate y(1), roll(3), yaw(5), vy(7), p(9), r(11)."""
         if not self.all_eskf_:
             return
-        X, Y, T, Hx, Hy, A, Ym, As, Syw, Svl = self._base_arrays()
+        X, Y, T, Hx, Hy, t, dt, Rs, Es, Gs, A, Ym, As, Syw, Svl = self._base_arrays()
 
         Xm = X.copy(); Ym_ = Y.copy()
         for col in (1, 3, 5, 7, 9, 11):
@@ -430,14 +506,14 @@ class ESKFGTLogger(Node):
         SywM = self._wrap_pi(-Syw).astype(np.float32)
 
         fid = f'{self.flight_id_}_mirror'
-        self._save_flight(fid, Xm, Ym_, T, Hxm, Hym,
+        self._save_flight(fid, Xm, Ym_, T, Hxm, Hym, t, dt, Rs, Es, Gs,
                           Am, YmM, AsM, SywM, Svl.copy())
 
     def _save_fore_aft_mirror(self):
         """Fore-aft mirror: negate x(0), roll(3), vx(6), p(9), r(11); yaw → π−yaw."""
         if not self.all_eskf_:
             return
-        X, Y, T, Hx, Hy, A, Ym, As, Syw, Svl = self._base_arrays()
+        X, Y, T, Hx, Hy, t, dt, Rs, Es, Gs, A, Ym, As, Syw, Svl = self._base_arrays()
 
         Xm = X.copy(); Ym_ = Y.copy()
         for col in (0, 3, 6, 9, 11):
@@ -456,14 +532,14 @@ class ESKFGTLogger(Node):
         SywM = self._wrap_pi(np.pi - Syw).astype(np.float32)
 
         fid = f'{self.flight_id_}_fore_aft_mirror'
-        self._save_flight(fid, Xm, Ym_, T, Hxm, Hym,
+        self._save_flight(fid, Xm, Ym_, T, Hxm, Hym, t, dt, Rs, Es, Gs,
                           Am, YmM, AsM, SywM, Svl.copy())
 
     def _save_combined_mirror(self):
         """Combined 180° mirror: negate x(0),y(1),vx(6),vy(7); yaw → yaw+π."""
         if not self.all_eskf_:
             return
-        X, Y, T, Hx, Hy, A, Ym, As, Syw, Svl = self._base_arrays()
+        X, Y, T, Hx, Hy, t, dt, Rs, Es, Gs, A, Ym, As, Syw, Svl = self._base_arrays()
 
         Xm = X.copy(); Ym_ = Y.copy()
         for col in (0, 1, 6, 7):
@@ -482,7 +558,7 @@ class ESKFGTLogger(Node):
         SywM = self._wrap_pi(Syw + np.pi).astype(np.float32)
 
         fid = f'{self.flight_id_}_combined_mirror'
-        self._save_flight(fid, Xm, Ym_, T, Hxm, Hym,
+        self._save_flight(fid, Xm, Ym_, T, Hxm, Hym, t, dt, Rs, Es, Gs,
                           Am, YmM, AsM, SywM, Svl.copy())
 
     # ── Shutdown ───────────────────────────────────────────────────────────
@@ -495,7 +571,7 @@ class ESKFGTLogger(Node):
             self._save_mirror()
             self._save_fore_aft_mirror()
             self._save_combined_mirror()
-        elapsed = time.time() - self.start_time_
+        elapsed = max(float(self.all_t_[-1]), 1.0e-6) if self.all_t_ else time.time() - self.start_time_
         self.get_logger().info(
             f'Shutdown. Total samples: {self.total_samples_}, elapsed: {elapsed:.1f}s'
         )

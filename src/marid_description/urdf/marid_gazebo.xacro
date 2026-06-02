@@ -508,6 +508,7 @@
         <odom_frame>odom</odom_frame>
         <robot_base_frame>base_link_front</robot_base_frame>
         <publish_tf>false</publish_tf>
+        <update_rate>50</update_rate>
       </plugin>
     </gazebo>
 

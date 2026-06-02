@@ -23,12 +23,12 @@ def generate_launch_description():
         # Declare launch arguments for destination coordinates
         DeclareLaunchArgument(
             'destination_latitude',
-            default_value='48.8566',  # Paris, France randomization center
+            default_value='37.4',  # Gazebo world datum / randomization center
             description='Destination latitude in degrees, or random destination center when random_location is true'
         ),
         DeclareLaunchArgument(
             'destination_longitude',
-            default_value='2.3522',  # Paris, France randomization center
+            default_value='-122.1',  # Gazebo world datum / randomization center
             description='Destination longitude in degrees, or random destination center when random_location is true'
         ),
         DeclareLaunchArgument(
@@ -38,12 +38,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'random_location_min_radius_m',
-            default_value='1000.0',
+            default_value='500000.0',
             description='Minimum random destination distance from destination_latitude/longitude in meters'
         ),
         DeclareLaunchArgument(
             'random_location_max_radius_m',
-            default_value='5000.0',
+            default_value='1000000.0',
             description='Maximum random destination distance from destination_latitude/longitude in meters'
         ),
         DeclareLaunchArgument(
@@ -134,8 +134,8 @@ def launch_setup(context):
     destination_x = float(context.launch_configurations.get('destination_x', '-1.0'))
     destination_y = float(context.launch_configurations.get('destination_y', '-1.0'))
     random_location = _as_bool(context.launch_configurations.get('random_location', 'true'))
-    random_min_radius_m = float(context.launch_configurations.get('random_location_min_radius_m', '1000.0'))
-    random_max_radius_m = float(context.launch_configurations.get('random_location_max_radius_m', '5000.0'))
+    random_min_radius_m = float(context.launch_configurations.get('random_location_min_radius_m', '500000.0'))
+    random_max_radius_m = float(context.launch_configurations.get('random_location_max_radius_m', '1000000.0'))
     random_seed = context.launch_configurations.get('random_location_seed', '')
     use_center_thruster = context.launch_configurations.get('use_center_thruster', 'true').lower() == 'true'
     initial_thrust = float(context.launch_configurations.get('initial_thrust', '10.0'))
@@ -312,7 +312,7 @@ def launch_setup(context):
            name="eskf_gt_logger",
            output="screen",
            parameters=[{
-               'log_directory': '~/marid_ws/data_extended',
+               'log_directory': '~/marid_ws/data_sync',
                'log_rate': 50.0,
                'samples_per_file': 10000,
                'enable_logging': enable_logging,
@@ -330,36 +330,154 @@ def launch_setup(context):
                     name="marid_attitude_controller",
                     output='screen',
                     parameters=[{
-                        'update_rate': 50.0,
-                        # PID gains (reduced P, increased D for better damping)
-                        'roll_kp': 0.5,  # Reduced from 1.0
+                        'update_rate': 50.0,   # Hz — control loop rate
+
+                        # ── Legacy PID gains (unused when ESKF + rate-loop active) ──────────
+                        # These feed the PIDController objects but the main path uses
+                        # angle→rate→deflection chains below. Ki=0 everywhere: no integrator
+                        # windup risk, steady-state error handled by the outer altitude loop.
+                        'roll_kp': 0.12,
                         'roll_ki': 0.0,
-                        'roll_kd': 0.8,  # Increased from 0.3 for better damping
-                        'pitch_kp': 0.8,  # Reduced from 1.5
+                        'roll_kd': 0.55,
+                        'pitch_kp': 0.8,
                         'pitch_ki': 0.0,
-                        'pitch_kd': 1.0,  # Increased from 0.5 for better damping
-                        'yaw_kp': 0.5,  # Reduced from 1.0
+                        'pitch_kd': 1.0,
+                        'yaw_kp': 0.5,
                         'yaw_ki': 0.0,
-                        'yaw_kd': 0.8,  # Increased from 0.3 for better damping
-                        # Control surface limits
-                        'wing_max_deflection': 0.005,
-                        'tail_max_deflection': 0.045,
-                        # Altitude control (tail/wings pitch - works with thrust)
+                        'yaw_kd': 0.8,
+
+                        # ── Control surface deflection limits ────────────────────────────────
+                        # Hard clamp on every surface command. Tail drives pitch+yaw mixing;
+                        # wings drive roll only in cruise.
+                        'wing_max_deflection': math.radians(5.0),   # max wing deflection (rad)
+                        'tail_max_deflection': math.radians(10.0),  # max tail deflection (rad)
+
+                        # ── Altitude hold — vz cascade ───────────────────────────────────────
+                        # Two-stage: altitude_error → desired_vz → desired_pitch.
+                        # Stage 1: altitude_error (m) × altitude_pitch_gain → desired_vz (m/s),
+                        #          clipped to ±altitude_vz_max.
+                        # Stage 2: vz_error (m/s) × altitude_vz_pitch_gain → pitch angle (rad),
+                        #          clipped to ±altitude_pitch_max.
+                        # Settles naturally: at target altitude vz→0, then cruise_pitch_trim
+                        # provides the small steady cruise attitude bias.
                         'target_altitude': target_altitude,
-                        'altitude_pitch_gain': 0.03,
-                        'climb_wing_incidence': 0.0,  # rad — fixed wing AoA during climb
-                        'airborne_altitude_threshold': 50.0,  # m — pitch command always active (disabled for testing, set to 0.5 m for real runs)
-                        'airborne_speed_threshold': 13.0,   # m/s — must also exceed this to be considered airborne
-                        'pitch_slew_rate': 50.0,  # rad/s — ~1°/s max nose-up rate after liftoff
-                        'roll_slew_rate': 40.0,    # rad/s — ~ limit roll rate for better stability during climb
-                        # Waypoint navigation (for attitude control) - use local coordinates if set, otherwise GPS
+                        'altitude_pitch_gain': 0.1,      # altitude error (m) → desired vz (m/s)
+                        'altitude_vz_max': 5.0,           # max target vertical speed (m/s)
+                        'altitude_vz_pitch_gain': 0.025, # vz error (m/s) → pitch angle (rad)
+                        'altitude_pitch_max': 0.20,       # max pitch from altitude loop (rad ≈ ±11.5°)
+
+                        # ── Phase gates ──────────────────────────────────────────────────────
+                        # Drone is considered airborne (pitch/roll active) only when BOTH
+                        # thresholds are exceeded. Guards against spurious commands during
+                        # ground roll and slow taxi.
+                        'airborne_altitude_threshold': 5.0,   # m AGL — below this: ground mode
+                        'airborne_speed_threshold': 13.0,     # m/s — below this: ground mode
+                        'climb_wing_incidence': 0.0,          # fixed wing AoA offset during climb (rad)
+
+                        # ── Pitch target slew ────────────────────────────────────────────────
+                        # Limits how fast the desired pitch TARGET moves.
+                        # Prevents the −30° nose-up command from stepping instantaneously
+                        # at liftoff. Also smooths the climb→cruise transition step.
+                        # In cruise the slew is linear at cruise_pitch_slew_rate.
+                        # pitch_slew_slow_radius: error at which full slew rate is reached;
+                        #   below this the cubic shaping reduces the rate to prevent overshoot
+                        #   near the −30° climb target.
+                        # pitch_slew_curve_exponent: shape of rate reduction (3 = cubic).
+                        # pitch_slew_snap_threshold: error below which target is snapped
+                        #   directly (avoids infinite asymptotic approach).
+                        'pitch_slew_rate': math.radians(120.0),        # max slew rate (rad/s)
+                        'pitch_slew_slow_radius': math.radians(25.0),  # full-rate onset (rad)
+                        'pitch_slew_curve_exponent': 3.0,              # shaping exponent
+                        'pitch_slew_snap_threshold': math.radians(0.05),  # snap-to threshold (rad)
+
+                        # ── Cruise transition / surface command slew ─────────────────────────
+                        # cruise_pitch_slew_rate limits how fast the pitch target moves after
+                        # entering cruise. roll_slew_rate/cruise_roll_slew_rate limit roll
+                        # surface command changes so phase transitions do not step directly
+                        # into large wing inputs.
+                        'roll_slew_rate': math.radians(8.0),  # max roll command slew (rad/s)
+                        'cruise_pitch_slew_rate': math.radians(6.0),   # cruise pitch target slew (rad/s)
+                        'cruise_roll_slew_rate': math.radians(4.0),    # cruise roll surface slew (rad/s)
+                        'cruise_navigation_delay': 10.0,       # seconds to settle in cruise before waypoint turns
+                        'cruise_pitch_trim': math.radians(-2.0),  # neutral cruise pitch target
+                        'climb_pitch_up_boost': 1.15,          # extra tail authority for nose-up climb corrections
+                        'cruise_pitch_up_boost': 1.30,         # extra tail authority for nose-up cruise corrections
+
+                        # ── Roll rate loop ───────────────────────────────────────────────────
+                        # roll_angle_to_rate_gain: roll error (rad) → desired roll rate (rad/s).
+                        # max/min_roll_rate_command: clamp on the desired roll rate.
+                        # roll_angle_deadband: ignore roll errors smaller than this (rad).
+                        # roll_rate_kp: roll rate error → surface deflection gain.
+                        # roll_gain_reference_speed: airspeed (m/s) at which gains are nominal.
+                        #   Above this speed gains reduce as (ref/v)² — higher q needs less deflection.
+                        # min_roll_speed_scale: floor on the speed-scaling factor (prevents
+                        #   gains going to zero at very high speed).
+                        'roll_angle_to_rate_gain': 1.5,
+                        'max_roll_rate_command': math.radians(6.0),
+                        'min_roll_rate_command': math.radians(0.7),
+                        'roll_angle_deadband': math.radians(0.15),
+                        'roll_rate_kp': 0.035,
+                        'roll_gain_reference_speed': 20.0,
+                        'min_roll_speed_scale': 0.35,
+
+                        # ── Fallback attitude-rate filter ────────────────────────────────────
+                        # When odometry angular rates are unavailable, roll/pitch/yaw rates
+                        # are estimated from finite-differenced Euler angles. This EMA filter
+                        # smooths those estimates.
+                        # alpha: EMA coefficient (lower = smoother, more lag).
+                        # max_fallback_attitude_rate: sanity clamp on the estimated rate.
+                        'fallback_rate_filter_alpha': 0.08,
+                        'max_fallback_attitude_rate': math.radians(25.0),
+
+                        # ── Pitch rate loop ──────────────────────────────────────────────────
+                        # pitch_angle_to_rate_gain: pitch error (rad) → desired pitch rate (rad/s).
+                        #   At 10° error: desired rate = 2.4 × 0.175 = 0.42 rad/s = 24°/s.
+                        # max_pitch_rate_command: clamp on desired pitch rate. Saturates at
+                        #   pitch_error = max_rate / angle_to_rate_gain = 45/2.4 ≈ 18.75°.
+                        # pitch_rate_kp: pitch rate error → surface deflection gain.
+                        # pitch_gain_reference_speed / min_pitch_speed_scale: same q-scaling
+                        #   as roll — gains reduce with (ref/v)², floored at min_scale.
+                        'pitch_angle_to_rate_gain': 2.4,
+                        'max_pitch_rate_command': math.radians(30.0),
+                        'pitch_rate_kp': 0.12,
+                        'pitch_gain_reference_speed': 20.0,
+                        'min_pitch_speed_scale': 0.60,
+
+                        # ── Pitch deflection shaping ─────────────────────────────────────────
+                        # Scales the final pitch surface command based on pitch error magnitude.
+                        # In both climb and cruise it keys off pitch error, so pitch control
+                        # gets gentler near the target instead of kicking hard around 0°.
+                        # pitch_deflection_slow_radius: error at which scale reaches 1.0.
+                        #   Below this, scale reduces via cubic curve to min_scale.
+                        # pitch_deflection_curve_exponent: shaping (3 = cubic drop-off).
+                        # min_pitch_deflection_scale: floor authority at zero pitch error.
+                        #   Prevents full deflection when pitch error is tiny (overshoot guard).
+                        'pitch_deflection_slow_radius': math.radians(45.0),
+                        'pitch_deflection_curve_exponent': 4.0,
+                        'min_pitch_deflection_scale': 0.3625,
+
+                        # ── Yaw rate loop ────────────────────────────────────────────────────
+                        # Same structure as roll/pitch: yaw_error → rate → deflection.
+                        # Yaw is mixed into both tail surfaces (differential).
+                        # yaw_rate_deadband zeros tiny yaw-rate errors so climb/cruise logs do
+                        # not show constant tail twitches from measurement noise.
+                        'yaw_angle_to_rate_gain': 1.0,
+                        'max_yaw_rate_command': math.radians(8.0),
+                        'yaw_rate_kp': 0.05,
+                        'yaw_rate_deadband': math.radians(0.5),
+
+                        # ── Waypoint navigation ──────────────────────────────────────────────
+                        # Gentler cruise bank demand prevents the climb→cruise handoff from
+                        # suddenly asking for a large turn correction.
+                        'heading_to_bank_gain': 0.35,          # heading error (rad) → desired bank (rad)
+                        'max_bank_angle': math.radians(15.0),  # max commanded cruise bank
                         'destination_latitude': destination_lat if not use_local_coords else -1.0,
                         'destination_longitude': destination_lon if not use_local_coords else -1.0,
                         'destination_x': destination_x,
                         'destination_y': destination_y,
                         'datum_latitude': datum_lat,
                         'datum_longitude': datum_lon,
-                        'waypoint_tolerance': 2.0,
+                        'waypoint_tolerance': 2.0,   # m — distance to declare waypoint reached
                         'use_sim_time': True,
                     }]
                 )
