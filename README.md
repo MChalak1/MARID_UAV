@@ -15,7 +15,7 @@ Core simulation and control functionality is implemented and tested. Several sub
 Simulation with camera HUD overlay (roll/pitch/yaw + altitude) in Gazebo and LiDAR point cloud in RViz:
 
 ![Camera HUD overlay in Gazebo](docs/images/hud_gazebo.png)
-
+https://github.com/MChalak1/marid_ws/raw/main/docs/videos/flight_demo.mp4
 ---
 
 ## ✈️ Features
