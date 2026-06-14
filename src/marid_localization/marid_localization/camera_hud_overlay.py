@@ -8,6 +8,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image, Imu
+from std_msgs.msg import String
 
 
 class CameraHudOverlay(Node):
@@ -52,6 +53,15 @@ class CameraHudOverlay(Node):
         self.vy_gt_ = 0.0
         self.have_vel_est_ = False
         self.have_vel_gt_ = False
+
+        # Sim time tracking (from image header stamp)
+        self._sim_time_start_ = None
+
+        # Logger chunk status (received from eskf_gt_logger)
+        self._logger_status_ = 'Logger: waiting...'
+
+        self.create_subscription(
+            String, '/eskf_gt_logger/status', self._logger_status_cb, 10)
 
         self.image_sub_ = self.create_subscription(
             Image, self.image_topic_, self.image_callback, 10
@@ -145,6 +155,10 @@ class CameraHudOverlay(Node):
             self.vy_est_ = vy
             self.have_vel_est_ = True
 
+
+    def _logger_status_cb(self, msg: String):
+        self._logger_status_ = msg.data
+
     def gt_callback(self, msg: Odometry):
         q = msg.pose.pose.orientation
         roll_deg, pitch_deg, yaw_deg = self.quaternion_to_euler_deg(q.x, q.y, q.z, q.w)
@@ -170,6 +184,15 @@ class CameraHudOverlay(Node):
             return
 
         h, w = frame.shape[:2]
+
+        # Sim time from image header stamp
+        stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if self._sim_time_start_ is None:
+            self._sim_time_start_ = stamp_sec
+        elapsed = max(0.0, stamp_sec - self._sim_time_start_)
+        mins = int(elapsed) // 60
+        secs = elapsed - mins * 60
+        sim_time_str = f"Sim  {mins:02d}:{secs:04.1f}"
 
         x0 = 20
         y0 = 30
@@ -285,6 +308,21 @@ class CameraHudOverlay(Node):
 
         cv2.drawMarker(frame, (cx, cy), (0, 0, 0), cv2.MARKER_CROSS, 24, 4)
         cv2.drawMarker(frame, (cx, cy), (255, 255, 255), cv2.MARKER_CROSS, 20, 2)
+
+        # Bottom right — sim time
+        font       = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.65
+        thickness  = 2
+        (tw, th), _ = cv2.getTextSize(sim_time_str, font, font_scale, thickness)
+        br_x = w - tw - 15
+        br_y = h - 15
+        cv2.putText(frame, sim_time_str, (br_x + 1, br_y + 1), font, font_scale, (0, 0, 0),    thickness + 1, cv2.LINE_AA)
+        cv2.putText(frame, sim_time_str, (br_x,     br_y),     font, font_scale, (0, 255, 255), thickness,     cv2.LINE_AA)
+
+        # Bottom left — logger chunk status
+        bl_y = h - 15
+        cv2.putText(frame, self._logger_status_, (x0 + 1, bl_y + 1), font, font_scale, (0, 0, 0),    thickness + 1, cv2.LINE_AA)
+        cv2.putText(frame, self._logger_status_, (x0,     bl_y),     font, font_scale, (0, 255, 128), thickness,     cv2.LINE_AA)
 
         try:
             hud_msg = self.bridge_.cv2_to_imgmsg(frame, encoding="rgb8")

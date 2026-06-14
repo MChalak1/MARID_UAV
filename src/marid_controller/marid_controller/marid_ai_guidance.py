@@ -538,11 +538,10 @@ class MaridAIGuidance(Node):
             desired_speed = max(desired_speed, 25.0)
 
         if alt_error > 20.0:
-            # Emergency recovery: force climb-like behavior
-            self.flight_phase_ = 'climb'
-            self._altitude_stable_since_ = None
+            # Below target: halt turns and push speed but let attitude controller's
+            # altitude hold recover altitude smoothly rather than forcing full climb.
             desired_heading_rate = 0.0
-            desired_speed = max(desired_speed, 28.0)
+            desired_speed = max(desired_speed, 30.0)
 
         speed_msg = Float64()
         speed_msg.data = float(desired_speed)

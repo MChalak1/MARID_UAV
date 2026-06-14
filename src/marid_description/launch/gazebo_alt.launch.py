@@ -1,0 +1,174 @@
+import os
+import random
+from pathlib import Path
+from ament_index_python.packages import get_package_share_directory
+
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable, TimerAction
+from launch.substitutions import Command, LaunchConfiguration
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+
+from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+
+
+def generate_launch_description():
+    marid_description = get_package_share_directory("marid_description")
+
+    model_arg = DeclareLaunchArgument(name="model", default_value=os.path.join(
+                                        marid_description, "urdf", "marid_alt.urdf.xacro"
+                                        ),
+                                      description="Absolute path to robot urdf file"
+    )
+
+    world_arg = DeclareLaunchArgument(
+        name="world",
+        default_value="empty.sdf",
+        description="Absolute path to world SDF file to load"
+    )
+
+    spawn_yaw_arg = DeclareLaunchArgument(
+        name="spawn_yaw",
+        default_value="0.9",
+        description="Initial model yaw in radians when random_spawn_yaw is false."
+    )
+
+    random_spawn_yaw_arg = DeclareLaunchArgument(
+        name="random_spawn_yaw",
+        default_value="true",
+        description="If true, sample spawn yaw uniformly from [-pi, pi] and pass that same yaw to odometry."
+    )
+
+    gazebo_resource_path = SetEnvironmentVariable(
+        name="GZ_SIM_RESOURCE_PATH",
+        value=[
+            str(Path(marid_description).parent.resolve()),
+            ":",
+            os.path.join(marid_description, "worlds")
+            ]
+        )
+
+    robot_description = ParameterValue(Command([
+            "xacro ",
+            LaunchConfiguration("model")
+        ]),
+        value_type=str
+    )
+
+    robot_state_publisher_node = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        parameters=[{"robot_description": robot_description,
+                     "use_sim_time": True}],
+        remappings=[('joint_states', '/world/empty/model/marid/joint_state')]
+    )
+
+    gazebo = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(get_package_share_directory("ros_gz_sim"), "launch", "gz_sim.launch.py")
+        ]),
+        launch_arguments=[
+            ("gz_args", ["-r -v 4 ", LaunchConfiguration("world")]),
+            ("on_exit_shutdown", "true")
+        ]
+    )
+
+    imu_bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        name="marid_ros_gz_bridge",
+        parameters=[{"use_sim_time": True}],
+        remappings=[
+            ("/model/marid/odometry", "/gazebo/odom"),
+        ],
+        arguments=[
+            "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
+            "/imu@sensor_msgs/msg/Imu[gz.msgs.IMU",
+            "/model/marid/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry",
+            "/baro/pressure@sensor_msgs/msg/FluidPressure[gz.msgs.FluidPressure",
+            "/gps/fix@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat",
+            "/world/empty/state@gz.msgs.World[gz.msgs.World",
+            # Thruster plugins: force in N
+            "/model/marid/joint/thruster_center_joint/cmd_thrust@std_msgs/msg/Float64]gz.msgs.Double",
+            "/model/marid/joint/thruster_L_joint/cmd_thrust@std_msgs/msg/Float64]gz.msgs.Double",
+            "/model/marid/joint/thruster_R_joint/cmd_thrust@std_msgs/msg/Float64]gz.msgs.Double",
+            # Control surface joint commands (ROS2 -> Gazebo Transport)
+            "/model/marid/joint/left_wing_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
+            "/model/marid/joint/right_wing_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
+            "/model/marid/joint/tail_left_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
+            "/model/marid/joint/tail_right_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
+            "/airspeed@ros_gz_interfaces/msg/AirSpeed[gz.msgs.AirSpeed",
+            "/magnetometer@sensor_msgs/msg/MagneticField[gz.msgs.Magnetometer",
+            "/lidar/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
+            "/camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image",
+            "/camera/image_hud@sensor_msgs/msg/Image]gz.msgs.Image",
+            "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+            "/optical_flow/camera@sensor_msgs/msg/Image[gz.msgs.Image",
+            "/optical_flow/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+            "/sonar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
+            "/world/empty/model/marid/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model",
+        ],
+        output="screen"
+    )
+
+    def spawn_and_localization_setup(context, *args, **kwargs):
+        randomize = LaunchConfiguration("random_spawn_yaw").perform(context).lower()
+        if randomize in ("1", "true", "yes", "on"):
+            spawn_yaw = random.uniform(-3.141592653589793, 3.141592653589793)
+        else:
+            spawn_yaw = float(LaunchConfiguration("spawn_yaw").perform(context))
+        spawn_yaw_str = f"{spawn_yaw:.6f}"
+
+        gz_spawn_entity = TimerAction(
+            period=3.0,
+            actions=[
+                Node(
+                    package="ros_gz_sim",
+                    executable="create",
+                    output="screen",
+                    arguments=[
+                        "-topic", "robot_description",
+                        "-name", "marid",
+                        "-z", "0.2",
+                        "-Y", spawn_yaw_str,
+                    ],
+                )
+            ],
+        )
+
+        localization_launch = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource([
+                os.path.join(
+                    get_package_share_directory("marid_localization"),
+                    "launch",
+                    "local_localization.launch.py"
+                )
+            ]),
+            launch_arguments=[
+                ("initial_ground_yaw", spawn_yaw_str),
+            ],
+        )
+        return [gz_spawn_entity, localization_launch]
+
+    controller_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory("marid_controller"),
+                "launch",
+                "controller.launch.py"
+            )
+        ])
+    )
+
+    return LaunchDescription([
+        model_arg,
+        world_arg,
+        spawn_yaw_arg,
+        random_spawn_yaw_arg,
+        gazebo_resource_path,
+        robot_state_publisher_node,
+        gazebo,
+        imu_bridge,
+        OpaqueFunction(function=spawn_and_localization_setup),
+        controller_launch,
+    ])

@@ -36,6 +36,7 @@ install(PROGRAMS
   marid_controller/marid_guidance_tracker.py
   marid_controller/cmd_vel_to_wings.py
   marid_controller/joy_incrementer.py
+  marid_controller/marid_maneuver_gen.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

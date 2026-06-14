@@ -331,6 +331,12 @@ PUBLISHING RULES
 
 import math
 import numpy as np
+try:
+    import torch
+    import torch.nn as nn
+    _TORCH_AVAILABLE = True
+except ImportError:
+    _TORCH_AVAILABLE = False
 
 import rclpy
 import rclpy.duration
@@ -1152,6 +1158,10 @@ class MaridOdomPublisher(Node):
         # ------------------------------------------------------------------
         # Parameters: FAST-LIO position/yaw/velocity reference
         # ------------------------------------------------------------------
+        self.declare_parameter("use_position_lstm",      False)
+        self.declare_parameter("position_lstm_model_dir", "~/marid_ws/data_sync")
+        self.declare_parameter("use_velocity_lstm",      False)
+        self.declare_parameter("velocity_lstm_model_dir", "~/marid_ws/data_sync")
         self.declare_parameter("use_fastlio", True)
         self.declare_parameter("fastlio_topic", "/Odometry")
         # How much FAST-LIO nudges position each update (0=ignore, 1=hard reset).
@@ -1602,6 +1612,7 @@ class MaridOdomPublisher(Node):
         self.camera_init_to_odom_R_ = None
 
         self.last_a_norm_   = 9.81   # cached |a_sf| from IMU callback for Madgwick R scaling
+        self.last_imu_acc_  = np.zeros(3, dtype=np.float32)  # body-frame [ax,ay,az] for position LSTM
         self.last_phi_      = 0.0    # cached ESKF bank angle (rad) — used for coordinated-turn gate
         self.last_phi_tilt_ref_ = 0.0  # cached raw-/imu tilt bank angle for gravity roll gate
         self.last_phi_madg_ = 0.0      # cached Madgwick bank angle — diagnostic/fallback reference
@@ -1824,6 +1835,99 @@ class MaridOdomPublisher(Node):
             f"IMU specific_force={self.accel_is_sf_}, gravity={self.g_}, "
             f"calibration_required={self.calibration_required_} samples"
         )
+
+        # ── Velocity LSTM (optional runtime correction) ──────────────────────
+        self.use_velocity_lstm_ = bool(self.get_parameter("use_velocity_lstm").value)
+        self.vel_lstm_model_    = None
+        self.vel_lstm_hidden_   = None
+        self.vel_lstm_X_mean_   = None
+        self.vel_lstm_X_std_    = None
+        self.vel_lstm_y_mean_   = None
+        self.vel_lstm_y_std_    = None
+        self._prev_airborne_    = False   # for hidden-state reset on liftoff
+        if self.use_velocity_lstm_:
+            self._load_velocity_lstm_()
+
+        # ── Position LSTM (optional runtime correction) ──────────────────────
+        self.use_position_lstm_ = bool(self.get_parameter("use_position_lstm").value)
+        self.pos_lstm_model_    = None
+        self.pos_lstm_hidden_   = None
+        self.pos_lstm_X_mean_   = None
+        self.pos_lstm_X_std_    = None
+        self.pos_lstm_y_std_    = None
+        if self.use_position_lstm_:
+            self._load_position_lstm_()
+
+    def _load_velocity_lstm_(self):
+        if not _TORCH_AVAILABLE:
+            self.get_logger().error("Velocity LSTM requested but torch is not installed — disabled.")
+            self.use_velocity_lstm_ = False
+            return
+        from pathlib import Path
+
+        class _VelocityLSTM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(23, 128, 2, batch_first=True, dropout=0.3)
+                self.drop = torch.nn.Dropout(0.4)
+                self.fc   = torch.nn.Linear(128, 2)
+            def forward(self, x, hidden=None):
+                out, hidden = self.lstm(x, hidden)
+                return self.fc(self.drop(out)), hidden
+
+        model_dir = Path(self.get_parameter("velocity_lstm_model_dir").value).expanduser()
+        pt_path   = model_dir / "eskf_velocity_lstm.pt"
+        norm_path = model_dir / "eskf_velocity_lstm_norm.npz"
+        if not pt_path.exists() or not norm_path.exists():
+            self.get_logger().error(
+                f"Velocity LSTM files not found in {model_dir} — disabled.")
+            self.use_velocity_lstm_ = False
+            return
+        norm = np.load(norm_path)
+        self.vel_lstm_X_mean_ = norm['X_mean'].astype(np.float32)
+        self.vel_lstm_X_std_  = norm['X_std'].astype(np.float32)
+        self.vel_lstm_y_mean_ = norm['y_mean'].astype(np.float32)
+        self.vel_lstm_y_std_  = norm['y_std'].astype(np.float32)
+        model = _VelocityLSTM()
+        model.load_state_dict(torch.load(pt_path, map_location='cpu', weights_only=True))
+        model.eval()
+        self.vel_lstm_model_ = model
+        self.get_logger().info(f"Velocity LSTM loaded from {model_dir}")
+
+    def _load_position_lstm_(self):
+        if not _TORCH_AVAILABLE:
+            self.get_logger().error("Position LSTM requested but torch is not installed — disabled.")
+            self.use_position_lstm_ = False
+            return
+        from pathlib import Path
+
+        class _PositionLSTM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(23, 128, 1, batch_first=True)
+                self.drop = torch.nn.Dropout(0.1)
+                self.fc   = torch.nn.Linear(128, 2)
+            def forward(self, x, hidden=None):
+                out, hidden = self.lstm(x, hidden)
+                return self.fc(self.drop(out)), hidden
+
+        model_dir = Path(self.get_parameter("position_lstm_model_dir").value).expanduser()
+        pt_path   = model_dir / "eskf_position_lstm.pt"
+        norm_path = model_dir / "eskf_position_lstm_norm.npz"
+        if not pt_path.exists() or not norm_path.exists():
+            self.get_logger().error(
+                f"Position LSTM files not found in {model_dir} — disabled.")
+            self.use_position_lstm_ = False
+            return
+        norm = np.load(norm_path)
+        self.pos_lstm_X_mean_ = norm['X_mean'].astype(np.float32)
+        self.pos_lstm_X_std_  = norm['X_std'].astype(np.float32)
+        self.pos_lstm_y_std_  = norm['y_std'].astype(np.float32)
+        model = _PositionLSTM()
+        model.load_state_dict(torch.load(pt_path, map_location='cpu', weights_only=True))
+        model.eval()
+        self.pos_lstm_model_ = model
+        self.get_logger().info(f"Position LSTM loaded from {model_dir}")
 
     # ------------------------------------------------------------------
     # Utility helpers: validation, quaternion math, attitude gates
@@ -2740,6 +2844,7 @@ class MaridOdomPublisher(Node):
         a_sf_valid = all(math.isfinite(v) for v in (ax, ay, az))
         if a_sf_valid:
             self.last_a_norm_ = math.sqrt(ax*ax + ay*ay + az*az)
+            self.last_imu_acc_ = np.array([ax, ay, az], dtype=np.float32)
 
         now = self.get_clock().now()
         if self.eskf_imu_stamp_ is not None:
@@ -2842,6 +2947,66 @@ class MaridOdomPublisher(Node):
     # ------------------------------------------------------------------
     # Publishing: source priority, final odometry message, diagnostics, TF
     # ------------------------------------------------------------------
+    def _vel_lstm_step_(self):
+        """Run one velocity LSTM step; return (dvx, dvy) correction in m/s."""
+        feat   = self._pos_lstm_feature_()   # same 23-D input as position LSTM
+        X_norm = ((feat - self.vel_lstm_X_mean_) / self.vel_lstm_X_std_).astype(np.float32)
+        with torch.no_grad():
+            x_t = torch.tensor(X_norm).unsqueeze(0).unsqueeze(0)  # (1,1,23)
+            pred, self.vel_lstm_hidden_ = self.vel_lstm_model_(x_t, self.vel_lstm_hidden_)
+            self.vel_lstm_hidden_ = (
+                self.vel_lstm_hidden_[0].detach(),
+                torch.clamp(self.vel_lstm_hidden_[1].detach(), -100.0, 100.0),
+            )
+        delta = pred.squeeze().numpy() * self.vel_lstm_y_std_ + self.vel_lstm_y_mean_
+        return float(delta[0]), float(delta[1])
+
+    def _pos_lstm_feature_(self) -> np.ndarray:
+        """Build the 23-D feature vector that matches the position LSTM training input."""
+        roll, pitch, yaw = self._rpy_from_quaternion(self.qx_, self.qy_, self.qz_, self.qw_)
+        ep = self.eskf_.position if (self.eskf_ is not None and self.eskf_seeded_) else np.zeros(3)
+        ev = self.eskf_.velocity  if (self.eskf_ is not None and self.eskf_seeded_) else np.zeros(3)
+        eskf_12 = np.array([ep[0], ep[1], self.z_fused_,
+                             roll, pitch, yaw,
+                             ev[0], ev[1], ev[2],
+                             self.wx_, self.wy_, self.wz_], dtype=np.float32)
+        thrust      = np.float32(self.thrust_N_)
+        ground_flag = np.float32(1.0 if self.z_fused_ < 1.0 else 0.0)
+        V_src       = max(abs(self.last_airspeed_), 3.0)
+        psi_dot     = float(np.clip((self.g_ / V_src) * math.tan(roll), -2.0, 2.0))
+        psi_dot    *= (1.0 - float(ground_flag))
+        base = np.append(eskf_12, [thrust, ground_flag, np.float32(psi_dot)])
+
+        imu_acc = self.last_imu_acc_.copy()
+        imu_acc[1] = float(np.clip(imu_acc[1], -15.0, 15.0))
+        a_excess = np.float32(np.linalg.norm(imu_acc) - self.g_)
+        imu_acc[2] -= np.float32(self.g_ * math.cos(roll) * math.cos(pitch))
+
+        _, _, yaw_madg = self._rpy_from_quaternion(
+            self.madg_qx_, self.madg_qy_, self.madg_qz_, self.madg_qw_)
+        def _wrap(a): return math.atan2(math.sin(a), math.cos(a))
+        delta_madg = np.float32(_wrap(yaw_madg - yaw))
+        sun_valid  = np.float32(1.0 if self.sun_valid_ else 0.0)
+        delta_sun  = np.float32(_wrap(self.sun_yaw_ - yaw)) * sun_valid
+        airspeed   = np.float32(self.last_airspeed_)
+
+        return np.concatenate([base, imu_acc,
+                                [a_excess, delta_madg, airspeed, delta_sun, sun_valid]])
+
+    def _pos_lstm_step_(self):
+        """Run one LSTM step; return (dx, dy) position correction in metres."""
+        feat   = self._pos_lstm_feature_()
+        X_norm = ((feat - self.pos_lstm_X_mean_) / self.pos_lstm_X_std_).astype(np.float32)
+        with torch.no_grad():
+            x_t = torch.tensor(X_norm).unsqueeze(0).unsqueeze(0)  # (1,1,23)
+            pred, self.pos_lstm_hidden_ = self.pos_lstm_model_(x_t, self.pos_lstm_hidden_)
+            self.pos_lstm_hidden_ = (
+                self.pos_lstm_hidden_[0].detach(),
+                torch.clamp(self.pos_lstm_hidden_[1].detach(), -100.0, 100.0),
+            )
+        delta = pred.squeeze().numpy() * self.pos_lstm_y_std_
+        return float(delta[0]), float(delta[1])
+
     def publish_odom(self):
         now = self.get_clock().now()
 
@@ -3069,11 +3234,33 @@ class MaridOdomPublisher(Node):
             pos_variance = self.base_pos_var_ + self.var_growth_rate_ * max(0.0, elapsed_time)
         vel_variance = self.base_vel_var_
 
+        # Reset LSTM hidden states at the start of each new flight (ground → airborne).
+        if self.is_airborne_ and not self._prev_airborne_:
+            self.vel_lstm_hidden_ = None
+            self.pos_lstm_hidden_ = None
+        self._prev_airborne_ = self.is_airborne_
+
+        # Position LSTM correction — additive to published x/y only.
+        # Applied to local variables; self.x_ / self.y_ are intentionally NOT modified
+        # so internal dead-reckoning continues from the uncorrected ESKF state.
+        pos_x_pub = self.x_
+        pos_y_pub = self.y_
+        if (self.use_position_lstm_ and self.pos_lstm_model_ is not None
+                and self.eskf_ is not None and self.eskf_seeded_ and self.is_airborne_):
+            try:
+                dx, dy = self._pos_lstm_step_()
+                if math.isfinite(dx) and math.isfinite(dy):
+                    pos_x_pub += dx
+                    pos_y_pub += dy
+            except Exception as e:
+                self.get_logger().warn(f"Position LSTM step failed: {e}",
+                                       throttle_duration_sec=5.0)
+
         # Fill odometry
         self.odom_msg_.header.stamp = now.to_msg()
 
-        self.odom_msg_.pose.pose.position.x = self.x_
-        self.odom_msg_.pose.pose.position.y = self.y_
+        self.odom_msg_.pose.pose.position.x = pos_x_pub
+        self.odom_msg_.pose.pose.position.y = pos_y_pub
         self.odom_msg_.pose.pose.position.z = self.z_fused_
 
         self.odom_msg_.pose.pose.orientation.x = self.qx_
@@ -3186,6 +3373,20 @@ class MaridOdomPublisher(Node):
             self.last_vx_pub_ = vx_pub
             self.last_vy_pub_ = vy_pub
 
+        # Velocity LSTM correction — additive to published vx/vy only.
+        # self.eskf_.velocity is intentionally NOT modified so the Kalman filter
+        # state is unaffected; only the odometry output seen by downstream nodes changes.
+        if (self.use_velocity_lstm_ and self.vel_lstm_model_ is not None
+                and self.eskf_ is not None and self.eskf_seeded_ and self.is_airborne_):
+            try:
+                dvx, dvy = self._vel_lstm_step_()
+                if math.isfinite(dvx) and math.isfinite(dvy):
+                    vx_pub += dvx
+                    vy_pub += dvy
+            except Exception as e:
+                self.get_logger().warn(f"Velocity LSTM step failed: {e}",
+                                       throttle_duration_sec=5.0)
+
         self.odom_msg_.twist.twist.linear.x = vx_pub
         self.odom_msg_.twist.twist.linear.y = vy_pub
         self.odom_msg_.twist.twist.linear.z = self.vz_imu_ if not fastlio_stale else self.vz_baro_
@@ -3226,8 +3427,8 @@ class MaridOdomPublisher(Node):
             t.header.frame_id = "odom"
             t.child_frame_id = self.child_frame_id_
 
-            t.transform.translation.x = self.x_
-            t.transform.translation.y = self.y_
+            t.transform.translation.x = pos_x_pub
+            t.transform.translation.y = pos_y_pub
             t.transform.translation.z = self.z_fused_
             t.transform.rotation.x = self.qx_
             t.transform.rotation.y = self.qy_

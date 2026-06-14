@@ -98,6 +98,41 @@ def generate_launch_description():
             default_value='true',
             description='Enable attitude controller logging'
         ),
+        DeclareLaunchArgument(
+            'use_velocity_lstm',
+            default_value='false',
+            description='Enable velocity LSTM correction in odom node; logs saved to data_vel_mod'
+        ),
+        DeclareLaunchArgument(
+            'log_directory',
+            default_value='~/marid_ws/data_sync_alt',
+            description='Directory for ESKF ground-truth log files'
+        ),
+        DeclareLaunchArgument(
+            'use_maneuver_gen',
+            default_value='false',
+            description='Launch maneuver generator node for automated aggressive-maneuver training data collection'
+        ),
+        DeclareLaunchArgument(
+            'maneuver_timer_min_s',
+            default_value='15.0',
+            description='Minimum seconds between random waypoint changes'
+        ),
+        DeclareLaunchArgument(
+            'maneuver_timer_max_s',
+            default_value='45.0',
+            description='Maximum seconds between random waypoint changes'
+        ),
+        DeclareLaunchArgument(
+            'maneuver_wp_min_dist_m',
+            default_value='12000.0',
+            description='Minimum random waypoint distance from current position (m)'
+        ),
+        DeclareLaunchArgument(
+            'maneuver_wp_max_dist_m',
+            default_value='24000.0',
+            description='Maximum random waypoint distance from current position (m)'
+        ),
         # Use OpaqueFunction to access launch arguments and convert to floats
         OpaqueFunction(function=launch_setup)
     ])
@@ -145,7 +180,14 @@ def launch_setup(context):
     random_altitude = _as_bool(context.launch_configurations.get('random_altitude', 'true'))
     random_altitude_min_m = float(context.launch_configurations.get('random_altitude_min_m', '300.0'))
     random_altitude_max_m = float(context.launch_configurations.get('random_altitude_max_m', '3000.0'))
-    enable_logging = context.launch_configurations.get('enable_logging', 'true').lower() == 'true'
+    enable_logging        = context.launch_configurations.get('enable_logging', 'true').lower() == 'true'
+    log_directory         = context.launch_configurations.get('log_directory', '~/marid_ws/data_sync_alt')
+    use_velocity_lstm     = context.launch_configurations.get('use_velocity_lstm', 'false').lower() == 'true'
+    use_maneuver_gen      = context.launch_configurations.get('use_maneuver_gen', 'false').lower() == 'true'
+    maneuver_timer_min    = float(context.launch_configurations.get('maneuver_timer_min_s', '15.0'))
+    maneuver_timer_max    = float(context.launch_configurations.get('maneuver_timer_max_s', '45.0'))
+    maneuver_wp_min_dist  = float(context.launch_configurations.get('maneuver_wp_min_dist_m', '150.0'))
+    maneuver_wp_max_dist  = float(context.launch_configurations.get('maneuver_wp_max_dist_m', '500.0'))
     
     # Determine if local coordinates are set (both must be != -1.0)
     use_local_coords = (destination_x != -1.0 and destination_y != -1.0)
@@ -312,7 +354,9 @@ def launch_setup(context):
            name="eskf_gt_logger",
            output="screen",
            parameters=[{
-               'log_directory': '~/marid_ws/data_sync',
+               'use_velocity_lstm': use_velocity_lstm,
+               'log_directory': log_directory,
+               'log_directory_vel_mod': '~/marid_ws/data_vel_mod',
                'log_rate': 50.0,
                'samples_per_file': 10000,
                'enable_logging': enable_logging,
@@ -351,6 +395,19 @@ def launch_setup(context):
                         # wings drive roll only in cruise.
                         'wing_max_deflection': math.radians(5.0),   # max wing deflection (rad)
                         'tail_max_deflection': math.radians(10.0),  # max tail deflection (rad)
+
+                        # ── Speed-progressive deflection cap ─────────────────────────────────
+                        # Above deflection_cap_speed_low the effective surface limits tighten
+                        # as (v_low / v)^exponent — physically proportional to dynamic pressure
+                        # growth.  Below the threshold nothing changes.
+                        # cap_scale at v:  max(min_fraction, (v_low/v)^exponent)
+                        #   30 m/s → 1.00  (no cap)
+                        #   35 m/s → 0.73
+                        #   45 m/s → 0.44
+                        #   60 m/s → 0.25  (approaching floor)
+                        'deflection_cap_speed_low': 25.0,        # m/s — cap onset
+                        'deflection_cap_min_fraction': 0.08,     # floor: 8 % of nominal max
+                        'deflection_cap_exponent': 3.0,          # whole-wing surface: cubic taper
 
                         # ── Altitude hold — vz cascade ───────────────────────────────────────
                         # Two-stage: altitude_error → desired_vz → desired_pitch.
@@ -399,7 +456,7 @@ def launch_setup(context):
                         'cruise_pitch_slew_rate': math.radians(6.0),   # cruise pitch target slew (rad/s)
                         'cruise_roll_slew_rate': math.radians(4.0),    # cruise roll surface slew (rad/s)
                         'cruise_navigation_delay': 10.0,       # seconds to settle in cruise before waypoint turns
-                        'cruise_pitch_trim': math.radians(-2.0),  # neutral cruise pitch target
+                        'cruise_pitch_trim': math.radians(-3.0),  # neutral cruise pitch target
                         'climb_pitch_up_boost': 1.15,          # extra tail authority for nose-up climb corrections
                         'cruise_pitch_up_boost': 1.30,         # extra tail authority for nose-up cruise corrections
 
@@ -470,7 +527,7 @@ def launch_setup(context):
                         # Gentler cruise bank demand prevents the climb→cruise handoff from
                         # suddenly asking for a large turn correction.
                         'heading_to_bank_gain': 0.35,          # heading error (rad) → desired bank (rad)
-                        'max_bank_angle': math.radians(15.0),  # max commanded cruise bank
+                        'max_bank_angle': math.radians(25.0),  # max commanded cruise bank
                         'destination_latitude': destination_lat if not use_local_coords else -1.0,
                         'destination_longitude': destination_lon if not use_local_coords else -1.0,
                         'destination_x': destination_x,
@@ -483,4 +540,24 @@ def launch_setup(context):
                 )
             ]
         ),
-    ]
+    ] + ([
+        TimerAction(
+            period=30.0,  # wait for liftoff + cruise stabilisation before first maneuver
+            actions=[
+                Node(
+                    package='marid_controller',
+                    executable='marid_maneuver_gen.py',
+                    name='marid_maneuver_gen',
+                    output='screen',
+                    parameters=[{
+                        'timer_min_s':    maneuver_timer_min,
+                        'timer_max_s':    maneuver_timer_max,
+                        'wp_min_dist_m':  maneuver_wp_min_dist,
+                        'wp_max_dist_m':  maneuver_wp_max_dist,
+                        'startup_delay_s': 0.0,
+                        'use_sim_time': True,
+                    }],
+                )
+            ]
+        ),
+    ] if use_maneuver_gen else [])

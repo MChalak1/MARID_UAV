@@ -80,6 +80,9 @@ class MaridAttitudeController(Node):
 
         self.declare_parameter('wing_max_deflection', 0.15)
         self.declare_parameter('tail_max_deflection', 0.15)
+        self.declare_parameter('deflection_cap_speed_low', 30.0)
+        self.declare_parameter('deflection_cap_min_fraction', 0.20)
+        self.declare_parameter('deflection_cap_exponent', 2.0)
 
         self.declare_parameter('destination_latitude', -1.0)
         self.declare_parameter('destination_longitude', -1.0)
@@ -104,8 +107,8 @@ class MaridAttitudeController(Node):
         self.declare_parameter('roll_slew_rate', 0.0085)
         self.declare_parameter('cruise_pitch_slew_rate', math.radians(20.0))
         self.declare_parameter('cruise_roll_slew_rate', math.radians(4.0))
-        self.declare_parameter('cruise_navigation_delay', 10.0)
-        self.declare_parameter('cruise_pitch_trim', math.radians(-2.0))
+        self.declare_parameter('cruise_navigation_delay', 5.0)
+        self.declare_parameter('cruise_pitch_trim', math.radians(-3.0))
         self.declare_parameter('climb_pitch_up_boost', 1.15)
         self.declare_parameter('cruise_pitch_up_boost', 1.15)
         self.declare_parameter('heading_to_bank_gain', 0.35)
@@ -209,6 +212,10 @@ class MaridAttitudeController(Node):
         self.max_yaw_rate_command_ = self.get_parameter('max_yaw_rate_command').value
         self.yaw_rate_kp_ = self.get_parameter('yaw_rate_kp').value
         self.yaw_rate_deadband_ = self.get_parameter('yaw_rate_deadband').value
+
+        self.deflection_cap_speed_low_ = self.get_parameter('deflection_cap_speed_low').value
+        self.deflection_cap_min_fraction_ = self.get_parameter('deflection_cap_min_fraction').value
+        self.deflection_cap_exponent_ = self.get_parameter('deflection_cap_exponent').value
 
         self.current_speed_ = 0.0
         self.slewed_pitch_ = 0.0
@@ -520,7 +527,7 @@ class MaridAttitudeController(Node):
 
             elif airborne:
                 self.cruise_enter_altitude_ = self.target_altitude_ * 1.00
-                self.climb_reentry_altitude_ = self.target_altitude_ * 0.95
+                self.climb_reentry_altitude_ = self.target_altitude_ * 0.80
                 entering_cruise = False
                 # Stay at climb pitch until target altitude reached
                 if self.current_altitude_ < self.cruise_enter_altitude_:
@@ -602,6 +609,19 @@ class MaridAttitudeController(Node):
         # =========================================================
 
         speed_for_gain = max(abs(self.current_speed_), 1.0)
+
+        wing_max = self.get_parameter('wing_max_deflection').value
+        tail_max = self.get_parameter('tail_max_deflection').value
+        if abs(self.current_speed_) > self.deflection_cap_speed_low_:
+            cap_scale = max(
+                self.deflection_cap_min_fraction_,
+                (self.deflection_cap_speed_low_ / abs(self.current_speed_)) ** self.deflection_cap_exponent_,
+            )
+        else:
+            cap_scale = 1.0
+        effective_wing_max = wing_max * cap_scale
+        effective_tail_max = tail_max * cap_scale
+
         roll_speed_scale = (self.roll_gain_reference_speed_ / speed_for_gain) ** 2
         roll_speed_scale = float(np.clip(
             roll_speed_scale,
@@ -624,8 +644,8 @@ class MaridAttitudeController(Node):
         roll_command_raw = self.roll_rate_kp_ * roll_speed_scale * roll_rate_error
         roll_command_raw = float(np.clip(
             roll_command_raw,
-            -self.get_parameter('wing_max_deflection').value,
-            self.get_parameter('wing_max_deflection').value,
+            -effective_wing_max,
+            effective_wing_max,
         ))
         pitch_speed_scale = (self.pitch_gain_reference_speed_ / speed_for_gain) ** 2
         pitch_speed_scale = float(np.clip(
@@ -633,7 +653,6 @@ class MaridAttitudeController(Node):
             self.min_pitch_speed_scale_,
             1.0,
         ))
-        tail_max = self.get_parameter('tail_max_deflection').value
 
         desired_pitch_rate = self.pitch_angle_to_rate_gain_ * pitch_error
         desired_pitch_rate = float(np.clip(
@@ -649,15 +668,15 @@ class MaridAttitudeController(Node):
         pitch_deflection_scale = self.min_pitch_deflection_scale_ + (
             1.0 - self.min_pitch_deflection_scale_
         ) * (pitch_deflection_fraction ** self.pitch_deflection_curve_exponent_)
-        pitch_command = self.pitch_rate_kp_ * pitch_speed_scale * pitch_rate_error * pitch_deflection_scale
+        pitch_command = self.pitch_rate_kp_ * cap_scale * pitch_speed_scale * pitch_rate_error * pitch_deflection_scale
         if self.flight_phase_ == 'climb' and pitch_command < 0.0:
             pitch_command *= self.climb_pitch_up_boost_
         elif self.flight_phase_ == 'cruise' and pitch_command < 0.0:
             pitch_command *= self.cruise_pitch_up_boost_
         pitch_command = float(np.clip(
             pitch_command,
-            -tail_max,
-            tail_max,
+            -effective_tail_max,
+            effective_tail_max,
         ))
         desired_yaw_rate = self.yaw_angle_to_rate_gain_ * yaw_error
         desired_yaw_rate = float(np.clip(
@@ -671,8 +690,8 @@ class MaridAttitudeController(Node):
         yaw_command = -self.yaw_rate_kp_ * yaw_rate_error
         yaw_command = float(np.clip(
             yaw_command,
-            -tail_max,
-            tail_max,
+            -effective_tail_max,
+            effective_tail_max,
         ))
 
         # =========================================================
@@ -722,11 +741,10 @@ class MaridAttitudeController(Node):
         left_tail_deflection = tail_pitch_assist - active_yaw
         right_tail_deflection = tail_pitch_assist + active_yaw
 
-        wing_max = self.get_parameter('wing_max_deflection').value
-        left_wing_deflection = float(np.clip(left_wing_deflection, -wing_max, wing_max))
-        right_wing_deflection = float(np.clip(right_wing_deflection, -wing_max, wing_max))
-        left_tail_deflection = float(np.clip(left_tail_deflection, -tail_max, tail_max))
-        right_tail_deflection = float(np.clip(right_tail_deflection, -tail_max, tail_max))
+        left_wing_deflection = float(np.clip(left_wing_deflection, -effective_wing_max, effective_wing_max))
+        right_wing_deflection = float(np.clip(right_wing_deflection, -effective_wing_max, effective_wing_max))
+        left_tail_deflection = float(np.clip(left_tail_deflection, -effective_tail_max, effective_tail_max))
+        right_tail_deflection = float(np.clip(right_tail_deflection, -effective_tail_max, effective_tail_max))
 
         # =========================================================
         # 5. LOGGING
@@ -767,7 +785,7 @@ class MaridAttitudeController(Node):
                 f"desired_yaw_rate={math.degrees(desired_yaw_rate):.2f}\n"
                 f"yaw_rate_error={math.degrees(yaw_rate_error):.2f}\n"
                 f"yaw_rate={math.degrees(self.current_yaw_rate_):.4f}\n"
-                f"speed={self.current_speed_:.2f}\n"
+                f"speed={self.current_speed_:.2f}  cap_scale={cap_scale:.3f}  eff_wing_max={math.degrees(effective_wing_max):.2f}deg  eff_tail_max={math.degrees(effective_tail_max):.2f}deg\n"
                 f"altitude={current_altitude if current_altitude is not None else float('nan'):.2f}\n"
                 f"target_altitude={self.target_altitude_:.2f}\n"
                 f"cruise_enter_altitude={self.cruise_enter_altitude_ if hasattr(self, 'cruise_enter_altitude_') else float('nan'):.2f}\n"

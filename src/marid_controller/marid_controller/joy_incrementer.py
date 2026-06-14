@@ -22,7 +22,7 @@ class JoyIncrementer(Node):
         super().__init__('joy_incrementer')
 
         self.declare_parameter('thrust_min', 0.0)
-        self.declare_parameter('thrust_max', 5000.0)
+        self.declare_parameter('thrust_max', 25000.0)
         self.declare_parameter('surface_min', -0.5)
         self.declare_parameter('surface_max', 0.5)
 

@@ -39,7 +39,7 @@ from torch.utils.data import TensorDataset, DataLoader
 
 BATCH_SIZE = 4096   # mini-batch size; full-batch GD on 1M+ rows causes OOM on CPU
 
-DATA_FOLDER = 'data_low_err'    # 'data' → 15-col base;  'data_low_err' → enriched 23-col corpus
+DATA_FOLDER = 'data_sync'       # 'data' → 15-col base;  'data_low_err' → enriched 23-col corpus
 DATA_DIR    = Path(f'~/marid_ws/{DATA_FOLDER}').expanduser()
 
 SELECTED_FLIGHTS    = []
@@ -48,9 +48,9 @@ TRAIN_PER_FLIGHT    = False  # True → one model per flight; False → one mode
 EARLY_STOP_PATIENCE = 100
 VAL_MSE_TARGET      = 0.0
 INCLUDE_MIRRORED    = True   # include logger-saved _mirror flights in train (never in val)
-VAL_FLIGHTS         = [                            # cold-start held-out flights (never seen during training)
-    'flight_20260529_105242',                      # ~7.3 min, May 29 — consistent with velocity/position LSTM val
-    'flight_20260528_213551',                      # ~33.8 min, May 28 — different session, different thrust/airspeed profile
+VAL_FLIGHTS         = [                            # cold-start held-out flights — identical to velocity LSTM val set
+    'flight_20260531_075734',
+    'flight_20260601_082638',
 ]
 _VAL_TIMESTAMPS = [v.replace('flight_', '') for v in VAL_FLIGHTS]  # for prefix-agnostic mirror exclusion
 
@@ -84,7 +84,7 @@ def _augment_eskf_inputs(eskf: np.ndarray, d) -> np.ndarray:
     vx, vy      = eskf[:, 6], eskf[:, 7]
     ground_flag = (z < 1.0).astype(np.float32)
 
-    if DATA_FOLDER == 'data_low_err' and 'airspeed' in d:
+    if DATA_FOLDER in ('data_low_err', 'data_sync') and 'airspeed' in d:
         V_src = np.clip(np.abs(d['airspeed'].astype(np.float32).ravel()[:N]), _MIN_V, None)
     else:
         V_src = np.clip(np.sqrt(vx**2 + vy**2), _MIN_V, None)
@@ -94,7 +94,7 @@ def _augment_eskf_inputs(eskf: np.ndarray, d) -> np.ndarray:
 
     base = np.concatenate([eskf, thrust[:, None], ground_flag[:, None], psi_dot[:, None]], axis=1)
 
-    if DATA_FOLDER != 'data_low_err' or 'imu_acc' not in d:
+    if DATA_FOLDER not in ('data_low_err', 'data_sync') or 'imu_acc' not in d:
         return base   # 15 cols
 
     def _wrap(a): return ((a + np.pi) % (2 * np.pi) - np.pi).astype(np.float32)
@@ -172,7 +172,7 @@ print(f'Found {len(flight_groups)} new-format flight(s), {len(legacy_files)} leg
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 
-INPUT_DIM = 23 if DATA_FOLDER == 'data_low_err' else 15
+INPUT_DIM = 23 if DATA_FOLDER in ('data_low_err', 'data_sync') else 15
 
 def make_model():
     return nn.Sequential(

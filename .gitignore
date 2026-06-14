@@ -209,4 +209,6 @@ data_extended/*.npz
 data_extended/*.pt
 data_extended/*.json
 data_sync/
+data_sync_alt/
+data_vel_mod/
 data_low_err/

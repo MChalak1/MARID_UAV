@@ -41,7 +41,7 @@ from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import Vector3Stamped
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, String
 from pathlib import Path
 from datetime import datetime
 import time
@@ -68,13 +68,18 @@ class ESKFGTLogger(Node):
         self.declare_parameter('sun_azimuth_topic',  '/sun_sensor/sun_azimuth_enu_rad')
         self.declare_parameter('sun_elevation_topic','/sun_sensor/sun_elevation_deg')
         self.declare_parameter('sun_el_min_deg',     10.0)
+        self.declare_parameter('use_velocity_lstm',  False)
         self.declare_parameter('log_directory',      '~/marid_ws/data_sync')
+        self.declare_parameter('log_directory_vel_mod', '~/marid_ws/data_vel_mod')
         self.declare_parameter('log_filename_prefix','marid_eskf_gt')
         self.declare_parameter('samples_per_file',   10000)
         self.declare_parameter('enable_logging',     True)
         self.declare_parameter('flight_id',          '')
 
-        log_dir = Path(self.get_parameter('log_directory').value).expanduser()
+        if self.get_parameter('use_velocity_lstm').value:
+            log_dir = Path(self.get_parameter('log_directory_vel_mod').value).expanduser()
+        else:
+            log_dir = Path(self.get_parameter('log_directory').value).expanduser()
         log_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir_          = log_dir
         self.prefix_           = self.get_parameter('log_filename_prefix').value
@@ -169,6 +174,8 @@ class ESKFGTLogger(Node):
                                  self._sun_azimuth_cb, 10)
         self.create_subscription(Float64, self.get_parameter('sun_elevation_topic').value,
                                  self._sun_elevation_cb, 10)
+
+        self._status_pub_ = self.create_publisher(String, '/eskf_gt_logger/status', 10)
 
         self.get_logger().info('ESKF-GT Logger ready (extended mode, GT-callback driven)')
         self.get_logger().info(f'  Output: {self.log_dir_}  |  Flight: {self.flight_id_}')
@@ -361,6 +368,13 @@ class ESKFGTLogger(Node):
         self.total_samples_ += 1
         if len(self.eskf_inputs_) >= self.samples_per_file_:
             self._save_chunk()
+
+        # Publish status for HUD (~1 Hz)
+        if self.total_samples_ % 50 == 0:
+            chunk_samples = len(self.eskf_inputs_)
+            msg = String()
+            msg.data = f'Chunk {self.file_counter_}  [{chunk_samples:>5}/{self.samples_per_file_}]'
+            self._status_pub_.publish(msg)
 
     # ── Save helpers ───────────────────────────────────────────────────────
 

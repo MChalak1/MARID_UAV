@@ -40,8 +40,8 @@ from pathlib import Path
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 DATA_DIR      = Path('~/marid_ws/data_sync').expanduser()      # flight chunks (val flights)
-MODEL_DIR     = Path('~/marid_ws/data_sync').expanduser()      # velocity LSTM (retrained)
-MODEL_DIR_FF  = Path('~/marid_ws/data_low_err').expanduser()   # attitude FF (not yet retrained)
+MODEL_DIR     = Path('~/marid_ws/data_sync').expanduser()      # velocity LSTM + position LSTM
+MODEL_DIR_FF  = Path('~/marid_ws/data_sync').expanduser()      # attitude FF (retrained on data_sync)
 OUT_JSON  = DATA_DIR / 'cascade_eval_results.json'
 OUT_PLOT  = DATA_DIR / 'cascade_eval_plots.png'
 
@@ -51,12 +51,19 @@ MAX_SOURCE_AGE_SEC = 0.030
 
 # Val flights held out from velocity LSTM training (cold-start, no data leakage)
 VAL_FLIGHTS = [
-    'flight_20260531_075734',   # original held-out val flight
     'flight_20260601_063117',
     'flight_20260601_071638',
     'flight_20260601_074510',
     'flight_20260601_082638',
     'flight_20260601_090950',
+    'flight_20260603_211100',
+    'flight_20260604_064124',
+    'flight_20260604_074357',
+    'flight_20260604_084209',
+    'flight_20260604_094326',
+    'flight_20260604_104717',
+    'flight_20260604_115444',
+    'flight_20260605_063323',
 ]
 
 # Snapshot times for position error table [s]
@@ -244,6 +251,18 @@ class VelocityLSTM(nn.Module):
         return self.fc(self.drop(out)), hidden
 
 
+class PositionLSTM(nn.Module):
+    def __init__(self, input_dim=23, hidden_dim=128, num_layers=1, output_dim=2):
+        super().__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+        self.drop = nn.Dropout(0.1)
+        self.fc   = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x, hidden=None):
+        out, hidden = self.lstm(x, hidden)
+        return self.fc(self.drop(out)), hidden
+
+
 # ── Load models ───────────────────────────────────────────────────────────────
 
 print('Loading models...')
@@ -271,6 +290,24 @@ vel_model = VelocityLSTM()
 vel_model.load_state_dict(torch.load(MODEL_DIR / 'eskf_velocity_lstm.pt', map_location='cpu', weights_only=True))
 vel_model.eval()
 print(f'  Velocity LSTM loaded (y_mean={vel_y_mean}, y_std={vel_y_std})')
+
+# Position LSTM (optional — skip gracefully if not yet trained)
+_pos_model_path = MODEL_DIR / 'eskf_position_lstm.pt'
+_pos_norm_path  = MODEL_DIR / 'eskf_position_lstm_norm.npz'
+pos_model = None
+pos_X_mean = pos_X_std = pos_y_mean = pos_y_std = None
+if _pos_model_path.exists() and _pos_norm_path.exists():
+    _pos_norm  = np.load(_pos_norm_path)
+    pos_X_mean = _pos_norm['X_mean'].astype(np.float32)
+    pos_X_std  = _pos_norm['X_std'].astype(np.float32)
+    pos_y_mean = _pos_norm['y_mean'].astype(np.float32)
+    pos_y_std  = _pos_norm['y_std'].astype(np.float32)
+    pos_model  = PositionLSTM()
+    pos_model.load_state_dict(torch.load(_pos_model_path, map_location='cpu', weights_only=True))
+    pos_model.eval()
+    print(f'  Position LSTM loaded (y_std={pos_y_std})')
+else:
+    print(f'  Position LSTM not found — Config D will be skipped')
 
 
 # ── Inference helpers ─────────────────────────────────────────────────────────
@@ -304,6 +341,30 @@ def predict_velocity_correction(feat: np.ndarray) -> np.ndarray:
             raw = pred.squeeze(0).numpy()   # (L, 2) normalised
             delta[i:i + len(raw)] = raw * vel_y_std + vel_y_mean
 
+    return delta
+
+
+def predict_position_correction(feat: np.ndarray) -> np.ndarray:
+    """[Δx, Δy] position correction for every timestep [m].
+
+    Predicts (gt_pos - eskf_fused_pos) — corrects residual ESKF sensor-fusion
+    position error (FAST-LIO / baro / sonar drift). Not a GPS-denied dead-reckoning
+    correction; the ESKF position input must come from a running sensor-fusion stack.
+    """
+    if pos_model is None:
+        return None
+    T      = len(feat)
+    delta  = np.zeros((T, 2), dtype=np.float32)
+    X_norm = ((feat - pos_X_mean) / pos_X_std).astype(np.float32)
+    hidden = None
+    with torch.no_grad():
+        for i in range(0, T, CHUNK_LEN):
+            chunk = torch.tensor(X_norm[i:i + CHUNK_LEN]).unsqueeze(0)
+            pred, hidden = pos_model(chunk, hidden)
+            hidden = (hidden[0].detach(),
+                      torch.clamp(hidden[1].detach(), -100.0, 100.0))
+            raw = pred.squeeze(0).numpy()
+            delta[i:i + len(raw)] = raw * pos_y_std + pos_y_mean
     return delta
 
 
@@ -376,6 +437,7 @@ def eval_flight(fid: str) -> dict:
     # ── Model predictions ────────────────────────────────────────────────────
     dpsi  = predict_yaw_correction(feat)          # (T,) rad
     dvel  = predict_velocity_correction(feat)     # (T, 2) m/s
+    dpos  = predict_position_correction(feat)     # (T, 2) m  or None
 
     yaw_corr = yaw_eskf + dpsi
 
@@ -402,6 +464,13 @@ def eval_flight(fid: str) -> dict:
     # gt_pos is subsampled (~10-17 Hz) but still a valid absolute reference for
     # the sensor-fusion position maintained by FAST-LIO/baro/sonar.
     eskf_pos_rmse = float(np.sqrt(np.mean(np.sum((eskf_pos - gt_pos)**2, axis=1))))
+
+    # Config D: sensor-fusion position + Position LSTM correction.
+    # dpos predicts (gt_pos - eskf_fused_pos); apply to the fused position, not DR.
+    eskf_pos_D_rmse = None
+    if dpos is not None:
+        pos_D_fused    = eskf_pos + dpos
+        eskf_pos_D_rmse = float(np.sqrt(np.mean(np.sum((pos_D_fused - gt_pos)**2, axis=1))))
 
     # ── Yaw RMSE ─────────────────────────────────────────────────────────────
     yaw_err_A = np.degrees(np.abs(_wrap(yaw_eskf[vel_metric_mask] - gt_yaw[vel_metric_mask])))
@@ -445,7 +514,11 @@ def eval_flight(fid: str) -> dict:
     theoretical_max = vrmse_A[2] * duration
 
     # ── Print per-flight summary ──────────────────────────────────────────────
-    print(f'\n  ESKF sensor-fusion position RMSE: {eskf_pos_rmse:.2f} m  (vs Gazebo gt_pos)')
+    print(f'\n  ESKF sensor-fusion position RMSE:')
+    print(f'    A  ESKF only     : {eskf_pos_rmse:.2f} m  (vs Gazebo gt_pos)')
+    if eskf_pos_D_rmse is not None:
+        imp_d = 100.0 * (eskf_pos_rmse - eskf_pos_D_rmse) / eskf_pos_rmse if eskf_pos_rmse > 0 else 0.0
+        print(f'    D  + Pos LSTM    : {eskf_pos_D_rmse:.2f} m  ({imp_d:+.1f}%)')
     print(f'  Velocity-error accumulation scale: {theoretical_max:.1f} m  '
           f'(= {vrmse_A[2]:.3f} m/s × {duration:.0f} s)')
 
@@ -477,6 +550,7 @@ def eval_flight(fid: str) -> dict:
         'velocity_rmse_rows': int(np.sum(vel_metric_mask)),
         'velocity_rmse_row_fraction': float(np.mean(vel_metric_mask)),
         'eskf_pos_rmse_m': eskf_pos_rmse,
+        'eskf_pos_D_rmse_m': eskf_pos_D_rmse,
         'yaw_rmse_deg':    {'A': yaw_rmse_A, 'B': yaw_rmse_B},
         'vel_rmse_mps': {
             'A': {'vx': vrmse_A[0], 'vy': vrmse_A[1], 'combined': vrmse_A[2]},
@@ -487,7 +561,8 @@ def eval_flight(fid: str) -> dict:
         '_arrays': {
             'T': T, 't_sec': t_sec, 'dt_sec': dt_sec,
             'gt_pos': gt_pos, 'gt_vel': gt_vel,
-            'eskf_pos':  eskf_pos,             # sensor-fusion position
+            'eskf_pos':   eskf_pos,            # sensor-fusion position
+            'eskf_pos_D': eskf_pos + dpos if dpos is not None else None,
             'pos_ref': pos_ref,                # Gazebo absolute position reference
             'pos_A': pos_A, 'pos_B': pos_B, 'pos_C': pos_C,
             'vx_A': vx_eskf, 'vy_A': vy_eskf,
@@ -538,6 +613,16 @@ for cfg in configs:
     print(f'  {labels[cfg]}: {np.mean(vals):.3f} ± {np.std(vals):.3f} m/s  '
           f'({np.mean(imp):+.1f}% vs A)')
 
+print('\nESKF sensor-fusion position RMSE (m):')
+pos_A_vals = [r['eskf_pos_rmse_m'] for r in results.values()]
+print(f'  {"A  ESKF only       "}: {np.mean(pos_A_vals):.2f} ± {np.std(pos_A_vals):.2f} m')
+pos_D_vals = [r['eskf_pos_D_rmse_m'] for r in results.values() if r['eskf_pos_D_rmse_m'] is not None]
+if pos_D_vals:
+    pos_A_matched = [r['eskf_pos_rmse_m'] for r in results.values() if r['eskf_pos_D_rmse_m'] is not None]
+    imp_d = [(a - d) / a * 100 for a, d in zip(pos_A_matched, pos_D_vals)]
+    print(f'  {"D  + Pos LSTM      "}: {np.mean(pos_D_vals):.2f} ± {np.std(pos_D_vals):.2f} m  '
+          f'({np.mean(imp_d):+.1f}% vs A)')
+
 # ── Save JSON (strip _arrays before serialising) ──────────────────────────────
 
 def _serialise(r):
@@ -549,7 +634,7 @@ print(f'\nResults saved to {OUT_JSON}')
 
 # ── Plots ─────────────────────────────────────────────────────────────────────
 
-colors = {'A': '#888888', 'B': '#2196F3', 'C': '#E91E63', 'GT_DR': '#4CAF50'}
+colors = {'A': '#888888', 'B': '#2196F3', 'C': '#E91E63', 'D': '#9C27B0', 'GT_DR': '#4CAF50'}
 
 n_flights = len(results)
 fig, axes = plt.subplots(n_flights, 3, figsize=(18, 6 * n_flights))
@@ -575,7 +660,11 @@ for row, (fid, res) in enumerate(results.items()):
     ax.plot(gt_p[:, 0],   gt_p[:, 1],   'k-',  lw=1.8,
             label='GT  (Gazebo pos)', alpha=0.85)
     ax.plot(eskf_p[:, 0], eskf_p[:, 1], '--',  lw=1.1, color=colors['A'],
-            label=f'ESKF fusion  RMSE = {res["eskf_pos_rmse_m"]:.1f} m', alpha=0.9)
+            label=f'A  ESKF fusion  RMSE = {res["eskf_pos_rmse_m"]:.1f} m', alpha=0.9)
+    if arr.get('eskf_pos_D') is not None and res['eskf_pos_D_rmse_m'] is not None:
+        ep_D = arr['eskf_pos_D']
+        ax.plot(ep_D[:, 0], ep_D[:, 1], '--', lw=1.1, color='#9C27B0',
+                label=f'D  + Pos LSTM   RMSE = {res["eskf_pos_D_rmse_m"]:.1f} m', alpha=0.9)
     ax.set_xlabel('X (m)'); ax.set_ylabel('Y (m)')
     ax.set_title(f'{fid}\nESKF sensor-fusion position vs GT')
     ax.legend(fontsize=8); ax.set_aspect('equal'); ax.grid(True, alpha=0.3)

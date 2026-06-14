@@ -37,15 +37,15 @@ from collections import defaultdict
 #   data          → old 12-col base ESKF inputs
 #   data_extended → 23-col enriched: imu_acc, a_excess, yaw sources, airspeed
 #   data_low_err  → recent low-error corpus with enriched arrays
-DATA_FOLDER  = 'data_low_err'
-USE_EXTENDED = DATA_FOLDER in ('data_extended', 'data_low_err')
+DATA_FOLDER  = 'data_sync'
+USE_EXTENDED = DATA_FOLDER in ('data_extended', 'data_low_err', 'data_sync')
 DATA_DIR     = Path(f"~/marid_ws/{DATA_FOLDER}").expanduser()
 
 _G        = 9.81
 _MIN_V    = 0.5
 _PDOT_MAX = 1.5
 
-CHUNK_LEN = 1000  # TBPTT chunk length (20s at 50 Hz) — position drift is ~8sec timescale
+CHUNK_LEN = 3000  # TBPTT chunk length (60s at 50 Hz) — longer window improves drift accumulation learning
 
 SELECTED_FLIGHTS    = []
 EXCLUDED_FLIGHTS    = []
@@ -55,8 +55,9 @@ VAL_MSE_TARGET      = 0.0
 INCLUDE_MIRRORED    = True   # include logger-saved _mirror flights in train (never in val)
 USE_AUTOREGRESSIVE  = False  # True → append Δ_{t-1} to LSTM input (input_dim+2);
                               # False → augmented ESKF state only
-VAL_FLIGHTS         = [                            # hold these flights out as cold-start val;
-    "flight_20260529_105242",
+VAL_FLIGHTS         = [                            # cold-start held-out flights — identical to velocity LSTM val set
+    'flight_20260531_075734',
+    'flight_20260601_082638',
 ]                                                  # mirrors of all val flights excluded from train
 
 _VAL_TIMESTAMPS = [v.replace('flight_', '') for v in VAL_FLIGHTS]  # for prefix-agnostic mirror exclusion
@@ -88,7 +89,7 @@ def _augment_eskf_inputs(eskf: np.ndarray, d) -> np.ndarray:
     vx, vy      = eskf[:, 6], eskf[:, 7]
     ground_flag = (z < 1.0).astype(np.float32)
 
-    if DATA_FOLDER in ('data_extended', 'data_low_err') and 'airspeed' in d:
+    if DATA_FOLDER in ('data_extended', 'data_low_err', 'data_sync') and 'airspeed' in d:
         V_src = np.clip(np.abs(d['airspeed'].astype(np.float32).ravel()[:N]), _MIN_V, None)
     else:
         V_src = np.clip(np.sqrt(vx**2 + vy**2), _MIN_V, None)
@@ -98,7 +99,7 @@ def _augment_eskf_inputs(eskf: np.ndarray, d) -> np.ndarray:
 
     base = np.concatenate([eskf, thrust[:, None], ground_flag[:, None], psi_dot[:, None]], axis=1)
 
-    if DATA_FOLDER not in ('data_extended', 'data_low_err') or 'imu_acc' not in d:
+    if DATA_FOLDER not in ('data_extended', 'data_low_err', 'data_sync') or 'imu_acc' not in d:
         return base   # 15 cols
 
     def _wrap(a): return ((a + np.pi) % (2 * np.pi) - np.pi).astype(np.float32)

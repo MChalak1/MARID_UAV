@@ -96,6 +96,16 @@ marid_odom_node:
     # SECTION 4 — FAST-LIO LiDAR-inertial odometry
     # -------------------------------------------------------------------------
 
+    # Velocity LSTM correction (ML post-processing on published vx/vy).
+    # Set to true to enable; model must exist at velocity_lstm_model_dir.
+    use_velocity_lstm: false
+    velocity_lstm_model_dir: "~/marid_ws/data_sync"
+
+    # Position LSTM correction (ML post-processing on published x/y).
+    # Set to true only after eskf_position_lstm.pt is trained and saved to data_sync.
+    use_position_lstm: false
+    position_lstm_model_dir: "~/marid_ws/data_sync"
+
     # Whether to subscribe to and fuse FAST-LIO odometry.
     use_fastlio: false
     fastlio_topic: "/Odometry"

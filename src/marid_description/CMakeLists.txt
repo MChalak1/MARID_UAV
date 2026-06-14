@@ -13,7 +13,7 @@ find_package(gz-math7 REQUIRED)
 find_package(gz-plugin2 REQUIRED)
 
 install(
-  DIRECTORY meshes meshes_2 urdf launch rviz worlds
+  DIRECTORY meshes meshes_2 meshes_3 urdf launch rviz worlds
   DESTINATION share/${PROJECT_NAME}
 )
 
